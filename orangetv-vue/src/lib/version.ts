@@ -1,0 +1,3 @@
+const CURRENT_VERSION = '8.9.5'
+
+export { CURRENT_VERSION }

@@ -1,0 +1,173 @@
+package com.orangetv.service;
+
+import com.orangetv.dto.auth.ChangePasswordRequest;
+import com.orangetv.dto.auth.LoginRequest;
+import com.orangetv.dto.auth.LoginResponse;
+import com.orangetv.dto.auth.RegisterRequest;
+import com.orangetv.entity.MachineCode;
+import com.orangetv.entity.User;
+import com.orangetv.entity.UserGroup;
+import com.orangetv.exception.ApiException;
+import com.orangetv.repository.MachineCodeRepository;
+import com.orangetv.repository.UserGroupRepository;
+import com.orangetv.repository.UserRepository;
+import com.orangetv.security.JwtTokenProvider;
+import com.orangetv.security.UserPrincipal;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.LocalDateTime;
+import java.util.Optional;
+
+@Slf4j
+@Service
+@RequiredArgsConstructor
+public class AuthService {
+
+    private final UserRepository userRepository;
+    private final UserGroupRepository userGroupRepository;
+    private final MachineCodeRepository machineCodeRepository;
+    private final PasswordEncoder passwordEncoder;
+    private final AuthenticationManager authenticationManager;
+    private final JwtTokenProvider tokenProvider;
+    private final TokenService tokenService;
+
+    @Value("${orangetv.allow-registration:true}")
+    private boolean allowRegistration;
+
+    @Value("${orangetv.default-user-group:default}")
+    private String defaultUserGroup;
+
+    @Value("${orangetv.require-device-code:false}")
+    private boolean requireDeviceCode;
+
+    @Transactional
+    public LoginResponse login(LoginRequest request) {
+        // 验证用户名密码
+        Authentication authentication = authenticationManager.authenticate(
+                new UsernamePasswordAuthenticationToken(request.getUsername(), request.getPassword())
+        );
+
+        SecurityContextHolder.getContext().setAuthentication(authentication);
+        UserPrincipal userPrincipal = (UserPrincipal) authentication.getPrincipal();
+
+        // 检查用户是否被禁用
+        User user = userRepository.findByUsername(request.getUsername())
+                .orElseThrow(() -> ApiException.unauthorized("用户不存在"));
+
+        if (!user.getEnabled()) {
+            throw ApiException.unauthorized("用户已被封禁");
+        }
+
+        // 检查机器码
+        boolean machineCodeBound = false;
+        if (requireDeviceCode && request.getMachineCode() != null) {
+            machineCodeBound = checkAndBindMachineCode(user, request.getMachineCode());
+        }
+
+        // 更新最后登录时间
+        user.setLastLoginAt(LocalDateTime.now());
+        userRepository.save(user);
+
+        // 生成 JWT token
+        String token = tokenProvider.generateToken(user.getId(), user.getUsername(), user.getRole());
+        tokenService.storeToken(user.getId(), token);
+
+        return LoginResponse.builder()
+                .ok(true)
+                .token(token)
+                .username(user.getUsername())
+                .role(user.getRole())
+                .avatar(user.getAvatar())
+                .machineCodeBound(machineCodeBound)
+                .expiresIn(tokenProvider.getExpirationTime())
+                .build();
+    }
+
+    @Transactional
+    public LoginResponse register(RegisterRequest request) {
+        if (!allowRegistration) {
+            throw ApiException.forbidden("注册功能已关闭");
+        }
+
+        if (userRepository.existsByUsername(request.getUsername())) {
+            throw ApiException.conflict("用户名已存在");
+        }
+
+        // 创建新用户
+        User user = User.builder()
+                .username(request.getUsername())
+                .password(passwordEncoder.encode(request.getPassword()))
+                .role("user")
+                .enabled(true)
+                .build();
+
+        // 添加默认用户组
+        userGroupRepository.findByName(defaultUserGroup)
+                .ifPresent(group -> user.getGroups().add(group));
+
+        userRepository.save(user);
+
+        // 绑定机器码
+        boolean machineCodeBound = false;
+        if (request.getMachineCode() != null) {
+            machineCodeBound = checkAndBindMachineCode(user, request.getMachineCode());
+        }
+
+        // 生成 JWT token
+        String token = tokenProvider.generateToken(user.getId(), user.getUsername(), user.getRole());
+        tokenService.storeToken(user.getId(), token);
+
+        return LoginResponse.builder()
+                .ok(true)
+                .token(token)
+                .username(user.getUsername())
+                .role(user.getRole())
+                .avatar(user.getAvatar())
+                .machineCodeBound(machineCodeBound)
+                .expiresIn(tokenProvider.getExpirationTime())
+                .build();
+    }
+
+    @Transactional
+    public void changePassword(Long userId, ChangePasswordRequest request) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> ApiException.notFound("用户不存在"));
+
+        user.setPassword(passwordEncoder.encode(request.getNewPassword()));
+        userRepository.save(user);
+        tokenService.removeToken(userId);
+    }
+
+    private boolean checkAndBindMachineCode(User user, String machineCode) {
+        Optional<MachineCode> existingCode = machineCodeRepository.findByUserAndMachineCode(user, machineCode);
+
+        if (existingCode.isPresent()) {
+            // 更新最后使用时间
+            existingCode.get().setLastUsedAt(LocalDateTime.now());
+            machineCodeRepository.save(existingCode.get());
+            return true;
+        }
+
+        // 检查机器码是否被其他用户绑定
+        // 这里简化处理，实际可能需要更复杂的逻辑
+
+        // 绑定新机器码
+        MachineCode newCode = MachineCode.builder()
+                .user(user)
+                .machineCode(machineCode)
+                .lastUsedAt(LocalDateTime.now())
+                .build();
+        machineCodeRepository.save(newCode);
+
+        return true;
+    }
+}

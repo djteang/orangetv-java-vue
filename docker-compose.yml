@@ -1,0 +1,14 @@
+services:
+  orangetv:
+    image: ${DOCKERHUB_USERNAME:-orangetv}/orangetv:latest
+    build:
+      context: /home/orangetv-java
+      dockerfile: Dockerfile
+    container_name: orangetv
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    volumes:
+      - /home/orangetv-java/uploads:/app/uploads
+    environment:
+      - JAVA_OPTS=-Xmx512m -Xms256m

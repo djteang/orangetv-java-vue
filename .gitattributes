@@ -1,0 +1,38 @@
+# 确保 shell 脚本始终使用 LF 换行符
+*.sh text eol=lf
+
+# 确保配置文件使用 LF 换行符
+nginx.conf text eol=lf
+Dockerfile text eol=lf
+docker-compose.yml text eol=lf
+.gitignore text eol=lf
+.gitattributes text eol=lf
+
+# 其他文本文件使用默认换行符
+*.md text
+*.txt text
+*.json text
+*.yml text
+*.yaml text
+*.xml text
+*.properties text
+*.java text
+*.ts text
+*.js text
+*.vue text
+*.css text
+*.scss text
+*.html text
+
+# 二进制文件
+*.jar binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.eot binary

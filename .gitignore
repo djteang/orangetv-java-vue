@@ -1,0 +1,191 @@
+# ============================================
+# IDE
+# ============================================
+.idea/
+.vscode/
+*.iml
+*.ipr
+*.iws
+.project
+.classpath
+.settings/
+*.swp
+*.swo
+*~
+
+# ============================================
+# Java / Maven
+# ============================================
+target/
+*.class
+*.jar
+*.war
+*.ear
+*.log
+*.ctxt
+.mtj.tmp/
+hs_err_pid*
+replay_pid*
+
+# Maven
+pom.xml.tag
+pom.xml.releaseBackup
+pom.xml.versionsBackup
+pom.xml.next
+release.properties
+dependency-reduced-pom.xml
+buildNumber.properties
+.mvn/timing.properties
+.mvn/wrapper/maven-wrapper.jar
+
+# ============================================
+# Node.js / Vue
+# ============================================
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Build output
+dist/
+dist-ssr/
+*.local
+
+# Environment files
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# ============================================
+# Application specific
+# ============================================
+# 上传文件目录
+uploads/
+
+# 部署目录
+deploy/
+
+# 日志文件
+logs/
+*.log
+
+# 临时文件
+*.tmp
+*.temp
+*.bak
+*.cache
+
+# ============================================
+# Database
+# ============================================
+*.db
+*.sqlite
+*.sqlite3
+
+# ============================================
+# OS
+# ============================================
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+.AppleDB
+.AppleDesktop
+Network Trash Folder
+Temporary Items
+.apdisk
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+*.stackdump
+[Dd]esktop.ini
+$RECYCLE.BIN/
+*.cab
+*.msi
+*.msix
+*.msm
+*.msp
+*.lnk
+
+# Linux
+*~
+.fuse_hidden*
+.directory
+.Trash-*
+.nfs*
+
+# ============================================
+# Docker
+# ============================================
+# 不忽略 Docker 配置文件，但忽略数据卷
+# docker-compose.yml
+# Dockerfile
+# docker-entrypoint.sh
+
+# ============================================
+# Git
+# ============================================
+*.orig
+*.rej
+
+# ============================================
+# Test coverage
+# ============================================
+coverage/
+*.lcov
+.nyc_output/
+
+# ============================================
+# Package managers
+# ============================================
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# ============================================
+# Build tools
+# ============================================
+.gradle/
+build/
+out/
+
+# ============================================
+# Security
+# ============================================
+# 敏感配置文件（如果有的话）
+application-prod.yml
+application-local.yml
+*.key
+*.pem
+*.p12
+*.jks
+
+# ============================================
+# Other
+# ============================================
+# Backup files
+*.backup
+*.old
+
+# Compressed files
+*.zip
+*.tar
+*.tar.gz
+*.rar
+*.7z

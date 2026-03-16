@@ -1,0 +1,113 @@
+server:
+  port: 8080
+  servlet:
+    context-path: /
+
+spring:
+  application:
+    name: orangetv-backend
+
+  datasource:
+    url: jdbc:mysql://192.168.1.123:3307/orangetv?useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&characterEncoding=UTF-8&useUnicode=true
+    username: root
+    password: txc!1234
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      maximum-pool-size: 20
+      minimum-idle: 5
+      idle-timeout: 300000
+      connection-timeout: 20000
+      max-lifetime: 1200000
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.MySQLDialect
+        format_sql: true
+    open-in-view: false
+
+  data:
+    redis:
+      host: 192.168.1.123
+      port: 6379
+      password: txc!1234
+      timeout: 10000
+      lettuce:
+        pool:
+          max-active: 20
+          max-idle: 10
+          min-idle: 5
+          max-wait: -1ms
+      database: 12
+
+  cache:
+    type: redis
+    redis:
+      time-to-live: 3600000
+      cache-null-values: false
+
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+    deserialization:
+      fail-on-unknown-properties: false
+    default-property-inclusion: non_null
+
+  servlet:
+    multipart:
+      max-file-size: 100MB
+      max-request-size: 100MB
+
+# JWT Configuration
+jwt:
+  secret: ${JWT_SECRET:your-256-bit-secret-key-here-change-in-production-please}
+  expiration: 86400000  # 24 hours in milliseconds
+  refresh-expiration: 2592000000  # 30 days in milliseconds
+
+# OrangeTV Configuration
+orangetv:
+  internal-api-key: ${INTERNAL_API_KEY:orangetv-internal-2026}
+  site-name: ${SITE_NAME:OrangeTV}
+  require-device-code: ${REQUIRE_DEVICE_CODE:true}
+  max-machine-codes: ${MAX_MACHINE_CODES:3}
+  allow-registration: ${ALLOW_REGISTRATION:true}
+  default-user-group: ${DEFAULT_USER_GROUP:default}
+  admin:
+    username: ${ADMIN_USERNAME:admin}
+    password: ${ADMIN_PASSWORD:admin}
+
+# Logging
+#logging:
+#  level:
+#    root: INFO
+#    com.orangetv: DEBUG
+#    org.springframework.security: INFO
+#    org.hibernate.SQL: WARN
+#  pattern:
+#    console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
+
+# Springdoc OpenAPI
+springdoc:
+  api-docs:
+    path: /api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    enabled: true
+
+# Upload Configuration
+upload:
+  path: ./uploads
+
+# OAuth Configuration
+oauth:
+  linuxdo:
+    client-id: ${LINUXDO_CLIENT_ID:0YxsaEQ5CQ0xtUDi3ZLeKBviumiVN4dO}
+    client-secret: ${LINUXDO_CLIENT_SECRET:wjfDIKy1ItMVhOWaZOjJXS22URypatHZ}
+    redirect-uri: ${LINUXDO_REDIRECT_URI:http://g9dbc62c.natappfree.cc/api/auth/linuxdo/callback}
+
+# Frontend URL
+frontend:
+  url: ${FRONTEND_URL:http://localhost:3000}
