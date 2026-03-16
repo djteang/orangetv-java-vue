@@ -84,8 +84,37 @@ cd /home/orangetv-java
 - `Dockerfile` - Docker 镜像构建文件
 - `docker-entrypoint.sh` - 容器启动脚本
 - `nginx.conf` - Nginx 配置文件
+- `.env` - 环境变量配置文件
 
-2. **构建后端**
+2. **配置环境变量**
+
+创建 `.env` 文件（可以从 `.env.example` 复制）：
+```bash
+cp .env.example .env
+```
+
+编辑 `.env` 文件，配置数据库和 Redis 连接信息：
+```bash
+# 数据库配置
+DB_URL=jdbc:mysql://your-mysql-host:3306/orangetv?useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&characterEncoding=UTF-8&useUnicode=true
+DB_USERNAME=root
+DB_PASSWORD=your_database_password
+
+# Redis 配置
+REDIS_HOST=your-redis-host
+REDIS_PORT=6379
+REDIS_PASSWORD=your_redis_password
+REDIS_DATABASE=0
+
+# JWT 密钥（请修改为随机字符串）
+JWT_SECRET=your-random-secret-key-at-least-32-characters
+
+# 管理员账号（首次登录后请修改）
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=admin123456
+```
+
+3. **构建后端**
 ```bash
 cd orangetv-backend
 mvn clean package -DskipTests
@@ -93,7 +122,7 @@ mvn clean package -DskipTests
 cp target/orangetv-backend-*.jar /home/orangetv-java/app.jar
 ```
 
-3. **构建前端**
+4. **构建前端**
 ```bash
 cd orangetv-vue
 npm install
@@ -102,16 +131,17 @@ npm run build
 cp -r dist /home/orangetv-java/
 ```
 
-4. **复制配置文件**
+5. **复制配置文件**
 ```bash
 # 复制必要的配置文件到部署目录
 cp docker-compose.yml /home/orangetv-java/
 cp Dockerfile /home/orangetv-java/
 cp docker-entrypoint.sh /home/orangetv-java/
 cp nginx.conf /home/orangetv-java/
+cp .env.example /home/orangetv-java/
 ```
 
-5. **转换脚本换行符（重要）**
+6. **转换脚本换行符（重要）**
 ```bash
 cd /home/orangetv-java
 # 转换为 Unix 格式，避免 Docker 启动错误
@@ -119,17 +149,17 @@ sed -i 's/\r$//' docker-entrypoint.sh
 chmod +x docker-entrypoint.sh
 ```
 
-6. **启动服务**
+7. **启动服务**
 ```bash
 docker-compose up -d --build
 ```
 
-7. **访问应用**
+8. **访问应用**
 ```
 http://服务器IP:3000
 ```
 
-默认管理员账号：`admin` / `admin`（首次登录后请修改密码）
+使用 `.env` 文件中配置的管理员账号登录。
 
 ## 部署
 
@@ -279,26 +309,60 @@ oauth:
 
 ## 环境变量
 
-### 后端环境变量
+所有环境变量都可以在 `.env` 文件中配置，或在 `docker-compose.yml` 中直接设置。
+
+### 必需配置
+
+| 变量                      | 说明                 | 示例值                    |
+| ------------------------- | -------------------- | ------------------------- |
+| DB_URL                    | 数据库连接地址       | jdbc:mysql://localhost:3306/orangetv?... |
+| DB_USERNAME               | 数据库用户名         | root                      |
+| DB_PASSWORD               | 数据库密码           | your_password             |
+| REDIS_HOST                | Redis 主机地址       | localhost                 |
+| REDIS_PORT                | Redis 端口           | 6379                      |
+| REDIS_PASSWORD            | Redis 密码           | your_password             |
+
+### 可选配置
 
 | 变量                      | 说明                 | 默认值                    |
 | ------------------------- | -------------------- | ------------------------- |
-| JWT_SECRET                | JWT 密钥             | 需要设置                  |
+| JWT_SECRET                | JWT 密钥             | your-256-bit-secret-key... |
 | ADMIN_USERNAME            | 管理员用户名         | admin                     |
 | ADMIN_PASSWORD            | 管理员密码           | admin                     |
 | SITE_NAME                 | 站点名称             | OrangeTV                  |
 | REQUIRE_DEVICE_CODE       | 是否启用设备码       | true                      |
 | ALLOW_REGISTRATION        | 是否允许注册         | true                      |
+| MAX_MACHINE_CODES         | 最大设备绑定数       | 3                         |
+| REDIS_DATABASE            | Redis 数据库编号     | 0                         |
 | LINUXDO_CLIENT_ID         | LinuxDo OAuth ID     | -                         |
 | LINUXDO_CLIENT_SECRET     | LinuxDo OAuth Secret | -                         |
 | LINUXDO_REDIRECT_URI      | LinuxDo 回调地址     | -                         |
+| FRONTEND_URL              | 前端 URL             | http://localhost:3000     |
+| INTERNAL_API_KEY          | 内部 API 密钥        | orangetv-internal-2026    |
 
-### 前端环境变量
+### 使用 Docker 镜像部署
 
-| 变量                                | 说明                     | 默认值 |
-| ----------------------------------- | ------------------------ | ------ |
-| VITE_API_BASE_URL                   | API 基础地址             | /api   |
-| VITE_SITE_NAME                      | 站点名称                 | OrangeTV |
+如果使用已发布的 Docker 镜像（如 ghcr.io），只需准备 `docker-compose.yml` 和 `.env` 文件：
+
+```yaml
+services:
+  orangetv:
+    image: ghcr.io/YOUR_USERNAME/orangetv:latest
+    container_name: orangetv
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    volumes:
+      - ./uploads:/app/uploads
+    env_file:
+      - .env
+```
+
+然后创建 `.env` 文件配置环境变量，直接启动：
+
+```bash
+docker-compose up -d
+```
 
 ## 功能说明
 

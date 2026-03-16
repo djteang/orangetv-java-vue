@@ -8,9 +8,9 @@ spring:
     name: orangetv-backend
 
   datasource:
-    url: jdbc:mysql://192.168.1.123:3307/orangetv?useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&characterEncoding=UTF-8&useUnicode=true
-    username: root
-    password: txc!1234
+    url: ${DB_URL:jdbc:mysql://localhost:3306/orangetv?useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&characterEncoding=UTF-8&useUnicode=true}
+    username: ${DB_USERNAME:root}
+    password: ${DB_PASSWORD:password}
     driver-class-name: com.mysql.cj.jdbc.Driver
     hikari:
       maximum-pool-size: 20
@@ -31,9 +31,9 @@ spring:
 
   data:
     redis:
-      host: 192.168.1.123
-      port: 6379
-      password: txc!1234
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
       timeout: 10000
       lettuce:
         pool:
@@ -41,7 +41,7 @@ spring:
           max-idle: 10
           min-idle: 5
           max-wait: -1ms
-      database: 12
+      database: ${REDIS_DATABASE:0}
 
   cache:
     type: redis
@@ -104,9 +104,9 @@ upload:
 # OAuth Configuration
 oauth:
   linuxdo:
-    client-id: ${LINUXDO_CLIENT_ID:0YxsaEQ5CQ0xtUDi3ZLeKBviumiVN4dO}
-    client-secret: ${LINUXDO_CLIENT_SECRET:wjfDIKy1ItMVhOWaZOjJXS22URypatHZ}
-    redirect-uri: ${LINUXDO_REDIRECT_URI:http://g9dbc62c.natappfree.cc/api/auth/linuxdo/callback}
+    client-id: ${LINUXDO_CLIENT_ID:id}
+    client-secret: ${LINUXDO_CLIENT_SECRET:key}
+    redirect-uri: ${LINUXDO_REDIRECT_URI:http://localhost:8080/api/auth/linuxdo/callback}
 
 # Frontend URL
 frontend:

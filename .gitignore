@@ -59,6 +59,8 @@ dist-ssr/
 .env.development.local
 .env.test.local
 .env.production.local
+# 但保留示例文件
+!.env.example
 
 # ============================================
 # Application specific

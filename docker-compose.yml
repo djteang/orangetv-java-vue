@@ -11,4 +11,40 @@ services:
     volumes:
       - /home/orangetv-java/uploads:/app/uploads
     environment:
+      # Java 内存配置
       - JAVA_OPTS=-Xmx512m -Xms256m
+
+      # 数据库配置
+      - DB_URL=${DB_URL:-jdbc:mysql://localhost:3306/orangetv?useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&characterEncoding=UTF-8&useUnicode=true}
+      - DB_USERNAME=${DB_USERNAME:-root}
+      - DB_PASSWORD=${DB_PASSWORD:-password}
+
+      # Redis 配置
+      - REDIS_HOST=${REDIS_HOST:-localhost}
+      - REDIS_PORT=${REDIS_PORT:-6379}
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+      - REDIS_DATABASE=${REDIS_DATABASE:-0}
+
+      # JWT 配置
+      - JWT_SECRET=${JWT_SECRET:-your-256-bit-secret-key-here-change-in-production-please}
+
+      # 站点配置
+      - SITE_NAME=${SITE_NAME:-OrangeTV}
+      - REQUIRE_DEVICE_CODE=${REQUIRE_DEVICE_CODE:-true}
+      - ALLOW_REGISTRATION=${ALLOW_REGISTRATION:-true}
+      - MAX_MACHINE_CODES=${MAX_MACHINE_CODES:-3}
+
+      # 管理员账号
+      - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin}
+
+      # LinuxDo OAuth（可选）
+      - LINUXDO_CLIENT_ID=${LINUXDO_CLIENT_ID:-}
+      - LINUXDO_CLIENT_SECRET=${LINUXDO_CLIENT_SECRET:-}
+      - LINUXDO_REDIRECT_URI=${LINUXDO_REDIRECT_URI:-}
+
+      # 前端 URL
+      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:3000}
+
+      # 其他配置
+      - INTERNAL_API_KEY=${INTERNAL_API_KEY:-orangetv-internal-2026}
