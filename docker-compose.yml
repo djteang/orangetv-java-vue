@@ -1,6 +1,6 @@
 services:
   orangetv:
-    image: ${DOCKERHUB_USERNAME:-orangetv}/orangetv:latest
+    image: ghcr.io/djteang/orangetv-java-vue:latest
     build:
       context: /home/orangetv-java
       dockerfile: Dockerfile
