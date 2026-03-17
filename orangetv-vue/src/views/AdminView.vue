@@ -1063,13 +1063,24 @@ async function handleImportData() {
                 </span>
               </td>
               <td class="py-3 px-2">
-                <div v-if="user.machineCodes && user.machineCodes.length > 0" class="text-xs">
-                  <div v-for="(mc, idx) in user.machineCodes.slice(0, 2)" :key="idx" class="truncate max-w-[120px]">
+                <div v-if="user.machineCodes && user.machineCodes.length > 0" class="text-xs space-y-1">
+                  <div
+                    v-for="(mc, idx) in user.machineCodes.slice(0, 2)"
+                    :key="idx"
+                    class="font-mono text-gray-900 dark:text-gray-100 break-all cursor-help"
+                    :title="`设备码: ${mc.machineCode}\n设备名称: ${mc.deviceName || '未设置'}\n创建时间: ${new Date(mc.createdAt).toLocaleString('zh-CN')}\n最后使用: ${mc.lastUsedAt ? new Date(mc.lastUsedAt).toLocaleString('zh-CN') : '未使用'}`"
+                  >
                     {{ mc.machineCode.substring(0, 16) }}...
                   </div>
-                  <span v-if="user.machineCodes.length > 2" class="text-gray-400">+{{ user.machineCodes.length - 2 }} 更多</span>
+                  <span
+                    v-if="user.machineCodes.length > 2"
+                    class="text-gray-500 dark:text-gray-400 cursor-help"
+                    :title="user.machineCodes.slice(2).map(mc => `${mc.machineCode} (${mc.deviceName || '未命名'})`).join('\n')"
+                  >
+                    +{{ user.machineCodes.length - 2 }} 更多
+                  </span>
                 </div>
-                <span v-else class="text-gray-400 text-xs">未绑定</span>
+                <span v-else class="text-gray-500 dark:text-gray-400 text-xs">未绑定</span>
               </td>
               <td class="py-3 px-2">
                 <span v-if="user.lastLoginAt" class="text-xs text-gray-600 dark:text-gray-400">

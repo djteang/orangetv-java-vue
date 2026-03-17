@@ -25,6 +25,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 
 @Slf4j
@@ -154,22 +155,37 @@ public class AuthService {
     }
 
     private boolean checkAndBindMachineCode(User user, String machineCode) {
-        Optional<MachineCode> existingCode = machineCodeRepository.findByUserAndMachineCode(user, machineCode);
+        // 检查用户是否已经绑定了设备码
+        List<MachineCode> userMachineCodes = machineCodeRepository.findByUser(user);
 
-        if (existingCode.isPresent()) {
-            // 更新最后使用时间
-            existingCode.get().setLastUsedAt(LocalDateTime.now());
-            machineCodeRepository.save(existingCode.get());
-            return true;
+        if (!userMachineCodes.isEmpty()) {
+            // 用户已经绑定了设备码，检查当前设备码是否在已绑定列表中
+            Optional<MachineCode> matchingCode = userMachineCodes.stream()
+                    .filter(mc -> mc.getMachineCode().equals(machineCode))
+                    .findFirst();
+
+            if (matchingCode.isPresent()) {
+                // 设备码匹配，更新最后使用时间
+                matchingCode.get().setLastUsedAt(LocalDateTime.now());
+                machineCodeRepository.save(matchingCode.get());
+                return true;
+            } else {
+                // 设备码不匹配，拒绝登录
+                throw ApiException.forbidden("此账户已绑定其他设备，请使用已绑定的设备登录");
+            }
         }
 
-        // 检查机器码是否被其他用户绑定
-        // 这里简化处理，实际可能需要更复杂的逻辑
+        // 用户还没有绑定设备码，检查该设备码是否被其他用户绑定
+        Optional<MachineCode> existingCode = machineCodeRepository.findByMachineCode(machineCode);
+        if (existingCode.isPresent()) {
+            throw ApiException.conflict("此设备已绑定到其他账户");
+        }
 
-        // 绑定新机器码
+        // 绑定新设备码
         MachineCode newCode = MachineCode.builder()
                 .user(user)
                 .machineCode(machineCode)
+                .createdAt(LocalDateTime.now())
                 .lastUsedAt(LocalDateTime.now())
                 .build();
         machineCodeRepository.save(newCode);
