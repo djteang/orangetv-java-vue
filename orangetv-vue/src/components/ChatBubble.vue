@@ -321,7 +321,7 @@ onUnmounted(() => {
                     :src="user.avatar"
                     class="w-8 h-8 rounded-full object-cover flex-shrink-0"
                   />
-                  <div v-else class="w-8 h-8 rounded-full bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center text-white text-sm font-semibold flex-shrink-0">
+                  <div v-else class="w-8 h-8 rounded-full flex items-center justify-center text-white text-sm font-semibold flex-shrink-0" style="background-color: #2563EB">
                     {{ user.username.charAt(0).toUpperCase() }}
                   </div>
                   <span class="flex-1 text-sm text-gray-800 dark:text-gray-200 truncate">{{ user.username }}</span>
@@ -369,7 +369,7 @@ onUnmounted(() => {
                   :src="friend.avatar"
                   class="w-8 h-8 rounded-full object-cover"
                 />
-                <div v-else class="w-8 h-8 rounded-full bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center text-white text-sm font-semibold">
+                <div v-else class="w-8 h-8 rounded-full flex items-center justify-center text-white text-sm font-semibold" style="background-color: #2563EB">
                   {{ friend.username.charAt(0).toUpperCase() }}
                 </div>
                 <!-- 在线状态指示器 -->

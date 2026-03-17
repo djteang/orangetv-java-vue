@@ -200,9 +200,12 @@ async function uploadBackground(event: Event) {
   }
 }
 
-// Format time like WeChat (timestamp is already in China timezone from backend)
+// Format time like WeChat (adjust for China timezone)
 function formatMessageTime(timestamp: number): string {
-  const date = new Date(timestamp)
+  // 如果服务器时区是 UTC，但数据库存储的是中国时间的时间戳
+  // 需要加上 8 小时的偏移（8 * 60 * 60 * 1000 = 28800000）
+  const adjustedTimestamp = timestamp + (8 * 60 * 60 * 1000)
+  const date = new Date(adjustedTimestamp)
   const now = new Date()
 
   const hours = date.getHours().toString().padStart(2, '0')
@@ -476,7 +479,7 @@ watch(() => props.conversationId, (newId) => {
             :src="friendAvatar"
             class="w-10 h-10 rounded-full object-cover"
           />
-          <div v-else class="w-10 h-10 rounded-full bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center text-white text-lg font-semibold">
+          <div v-else class="w-10 h-10 rounded-full flex items-center justify-center text-white text-lg font-semibold" style="background-color: #2563EB">
             {{ friendUsername.charAt(0).toUpperCase() }}
           </div>
           <span class="font-medium text-gray-800 dark:text-gray-200">{{ friendUsername }}</span>
@@ -537,7 +540,7 @@ watch(() => props.conversationId, (newId) => {
                 :src="getMessageAvatar(msg)!"
                 class="w-10 h-10 rounded-md object-cover flex-shrink-0"
               />
-              <div v-else class="w-10 h-10 rounded-md bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center text-white text-sm font-semibold flex-shrink-0">
+              <div v-else class="w-10 h-10 rounded-md flex items-center justify-center text-white text-sm font-semibold flex-shrink-0" style="background-color: #2563EB">
                 {{ msg.sender_name?.charAt(0).toUpperCase() }}
               </div>
 

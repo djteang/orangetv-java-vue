@@ -127,7 +127,7 @@ public class LinuxDoOAuthService {
             user.setNickname(nickname != null ? nickname : username);
             user.setPassword(UUID.randomUUID().toString()); // 随机密码，OAuth 用户不使用密码登录
             user.setAvatar(avatar);
-            user.setRole("USER");
+            user.setRole("user");
             user.setCreatedAt(LocalDateTime.now());
             user.setUpdatedAt(LocalDateTime.now());
             userRepository.save(user);
@@ -224,7 +224,7 @@ public class LinuxDoOAuthService {
                 userInfo.put("id", jsonNode.get("id").asText());
                 userInfo.put("username", jsonNode.get("username").asText());
                 userInfo.put("name", jsonNode.has("name") && !jsonNode.get("name").isNull() ? jsonNode.get("name").asText() : null);
-                userInfo.put("avatar_url", jsonNode.has("avatar_template") ? "https://connect.linux.do" + jsonNode.get("avatar_template").asText().replace("{size}", "120") : null);
+                userInfo.put("avatar_url", jsonNode.has("avatar_template") ? jsonNode.get("avatar_template").asText().replace("{size}", "120") : null);
                 userInfo.put("trust_level", jsonNode.has("trust_level") ? jsonNode.get("trust_level").asInt() : 0);
                 return userInfo;
             }
