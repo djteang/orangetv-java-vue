@@ -15,6 +15,8 @@ public interface MachineCodeRepository extends JpaRepository<MachineCode, Long> 
 
     List<MachineCode> findByUserId(Long userId);
 
+    Optional<MachineCode> findByMachineCode(String machineCode);
+
     Optional<MachineCode> findByUserAndMachineCode(User user, String machineCode);
 
     Optional<MachineCode> findByUserIdAndMachineCode(Long userId, String machineCode);

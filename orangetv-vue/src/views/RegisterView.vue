@@ -78,7 +78,7 @@ function goToLogin() {
 }
 
 function openGithub() {
-  window.open('https://github.com/djteang/OrangeTV', '_blank')
+  window.open('https://github.com/djteang/orangetv-java-vue', '_blank')
 }
 </script>
 

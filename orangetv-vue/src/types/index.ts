@@ -188,6 +188,12 @@ export interface User {
   avatar?: string
   createdAt?: string
   lastLoginAt?: string
+  machineCodes?: Array<{
+    machineCode: string
+    deviceName?: string
+    createdAt: string
+    lastUsedAt?: string
+  }>
 }
 
 // 登录响应

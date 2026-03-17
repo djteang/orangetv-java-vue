@@ -39,15 +39,13 @@ public class AuthService {
     private final AuthenticationManager authenticationManager;
     private final JwtTokenProvider tokenProvider;
     private final TokenService tokenService;
+    private final SiteConfigService siteConfigService;
 
     @Value("${orangetv.allow-registration:true}")
     private boolean allowRegistration;
 
     @Value("${orangetv.default-user-group:default}")
     private String defaultUserGroup;
-
-    @Value("${orangetv.require-device-code:false}")
-    private boolean requireDeviceCode;
 
     @Transactional
     public LoginResponse login(LoginRequest request) {
@@ -65,6 +63,14 @@ public class AuthService {
 
         if (!user.getEnabled()) {
             throw ApiException.unauthorized("用户已被封禁");
+        }
+
+        // 从数据库读取设备码验证配置
+        boolean requireDeviceCode = siteConfigService.getBooleanConfig("require_device_code", false);
+
+        // 如果启用了设备码验证，必须提供设备码
+        if (requireDeviceCode && (request.getMachineCode() == null || request.getMachineCode().isEmpty())) {
+            throw ApiException.badRequest("设备码验证已启用，请提供设备码");
         }
 
         // 检查机器码

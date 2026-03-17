@@ -76,8 +76,8 @@ public class AuthController {
     }
 
     @GetMapping("/auth/linuxdo/auth-url")
-    public ResponseEntity<ApiResponse<Map<String, String>>> getLinuxDoAuthUrl() {
-        Map<String, String> result = linuxDoOAuthService.getAuthUrl();
+    public ResponseEntity<ApiResponse<Map<String, String>>> getLinuxDoAuthUrl(@RequestParam(required = false) String machineCode) {
+        Map<String, String> result = linuxDoOAuthService.getAuthUrl(machineCode);
         return ResponseEntity.ok(ApiResponse.success(result));
     }
 

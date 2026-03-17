@@ -3,8 +3,10 @@ package com.orangetv.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.orangetv.dto.auth.LoginResponse;
+import com.orangetv.entity.MachineCode;
 import com.orangetv.entity.User;
 import com.orangetv.exception.ApiException;
+import com.orangetv.repository.MachineCodeRepository;
 import com.orangetv.repository.UserRepository;
 import com.orangetv.security.JwtTokenProvider;
 import lombok.RequiredArgsConstructor;
@@ -31,8 +33,10 @@ import java.util.concurrent.ConcurrentHashMap;
 public class LinuxDoOAuthService {
 
     private final UserRepository userRepository;
+    private final MachineCodeRepository machineCodeRepository;
     private final JwtTokenProvider tokenProvider;
     private final TokenService tokenService;
+    private final SiteConfigService siteConfigService;
     private final RestTemplate restTemplate;
     private final ObjectMapper objectMapper;
 
@@ -54,10 +58,16 @@ public class LinuxDoOAuthService {
     private String frontendUrl;
 
     private final Map<String, Long> oauthStateMap = new ConcurrentHashMap<>();
+    private final Map<String, String> stateMachineCodeMap = new ConcurrentHashMap<>();
 
-    public Map<String, String> getAuthUrl() {
+    public Map<String, String> getAuthUrl(String machineCode) {
         String state = UUID.randomUUID().toString();
         oauthStateMap.put(state, System.currentTimeMillis());
+
+        // 如果提供了设备码，保存到 state 映射中
+        if (machineCode != null && !machineCode.isEmpty()) {
+            stateMachineCodeMap.put(state, machineCode);
+        }
 
         String authUrl = String.format("%s?client_id=%s&redirect_uri=%s&response_type=code&scope=read&state=%s",
                 LINUX_DO_AUTH_URL, clientId, URLEncoder.encode(redirectUri, StandardCharsets.UTF_8), state);
@@ -73,6 +83,15 @@ public class LinuxDoOAuthService {
         Long timestamp = oauthStateMap.remove(state);
         if (timestamp == null || System.currentTimeMillis() - timestamp > 600000) {
             throw ApiException.unauthorized("无效的 state 参数");
+        }
+
+        // 获取关联的设备码
+        String machineCode = stateMachineCodeMap.remove(state);
+
+        // 检查是否启用了设备码验证
+        boolean requireDeviceCode = siteConfigService.getBooleanConfig("require_device_code", false);
+        if (requireDeviceCode && (machineCode == null || machineCode.isEmpty())) {
+            throw ApiException.badRequest("设备码验证已启用，请提供设备码");
         }
 
         // 获取 access token
@@ -115,8 +134,14 @@ public class LinuxDoOAuthService {
             log.info("Created new LinuxDo user: {}", user.getUsername());
         }
 
+        // 处理设备码绑定
+        boolean machineCodeBound = false;
+        if (requireDeviceCode && machineCode != null && !machineCode.isEmpty()) {
+            machineCodeBound = checkAndBindMachineCode(user, machineCode);
+        }
+
         // 更新最后登录时间
-        user.setUpdatedAt(LocalDateTime.now());
+        user.setLastLoginAt(LocalDateTime.now());
         userRepository.save(user);
 
         // 生成 JWT token
@@ -129,11 +154,35 @@ public class LinuxDoOAuthService {
                 .username(user.getUsername())
                 .role(user.getRole())
                 .avatar(user.getAvatar())
-                .machineCodeBound(false)
+                .machineCodeBound(machineCodeBound)
                 .expiresIn(tokenProvider.getExpirationTime())
                 .build();
 
         return response;
+    }
+
+    private boolean checkAndBindMachineCode(User user, String machineCode) {
+        MachineCode existingCode = machineCodeRepository.findByMachineCode(machineCode).orElse(null);
+
+        if (existingCode != null) {
+            // 设备码已存在，检查是否属于当前用户
+            if (!existingCode.getUser().getId().equals(user.getId())) {
+                throw ApiException.conflict("此设备已绑定到其他账户");
+            }
+            // 更新最后使用时间
+            existingCode.setLastUsedAt(LocalDateTime.now());
+            machineCodeRepository.save(existingCode);
+            return true;
+        } else {
+            // 创建新的设备码绑定
+            MachineCode newCode = new MachineCode();
+            newCode.setUser(user);
+            newCode.setMachineCode(machineCode);
+            newCode.setCreatedAt(LocalDateTime.now());
+            newCode.setLastUsedAt(LocalDateTime.now());
+            machineCodeRepository.save(newCode);
+            return true;
+        }
     }
 
     private String getAccessToken(String code) {

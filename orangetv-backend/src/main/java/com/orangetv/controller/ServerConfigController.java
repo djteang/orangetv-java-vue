@@ -44,9 +44,11 @@ public class ServerConfigController {
         config.putIfAbsent("allowRegistration", config.get("allow_registration"));
         config.put("storageType", "mysql");
 
-        // 检查是否配置了 LinuxDo OAuth（如果配置了 client-id 则启用）
-        boolean enableLinuxDoLogin = linuxDoClientId != null && !linuxDoClientId.isEmpty();
-        config.put("enableLinuxDoLogin", enableLinuxDoLogin);
+        // 检查是否配置了 LinuxDo OAuth（需要同时满足：站点配置启用 + 配置了 client-id）
+        Boolean enableLinuxDoLogin = siteConfigService.getBooleanConfig("enable_linuxdo_login", false);
+        // 只有在配置了 client-id 且站点配置启用时才真正启用
+        boolean actuallyEnabled = enableLinuxDoLogin && linuxDoClientId != null && !linuxDoClientId.isEmpty();
+        config.put("enableLinuxDoLogin", actuallyEnabled);
 
         return ResponseEntity.ok(config);
     }

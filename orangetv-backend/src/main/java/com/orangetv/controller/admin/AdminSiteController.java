@@ -45,6 +45,10 @@ public class AdminSiteController {
             siteConfigService.setConfig("site_interface_cache_time",
                     String.valueOf(request.get("SiteInterfaceCacheTime")), "number", null);
         }
+        if (request.containsKey("EnableLinuxDoLogin")) {
+            siteConfigService.setConfig("enable_linuxdo_login",
+                    String.valueOf(request.get("EnableLinuxDoLogin")), "boolean", null);
+        }
 
         return ResponseEntity.ok(ApiResponse.success());
     }

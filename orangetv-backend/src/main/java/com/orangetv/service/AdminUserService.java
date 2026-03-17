@@ -162,6 +162,20 @@ public class AdminUserService {
         map.put("avatar", user.getAvatar());
         map.put("createdAt", user.getCreatedAt());
         map.put("lastLoginAt", user.getLastLoginAt());
+
+        // 获取用户的设备码列表
+        List<Map<String, Object>> machineCodesList = user.getMachineCodes().stream()
+                .map(mc -> {
+                    Map<String, Object> mcMap = new HashMap<>();
+                    mcMap.put("machineCode", mc.getMachineCode());
+                    mcMap.put("deviceName", mc.getDeviceName());
+                    mcMap.put("createdAt", mc.getCreatedAt());
+                    mcMap.put("lastUsedAt", mc.getLastUsedAt());
+                    return mcMap;
+                })
+                .collect(Collectors.toList());
+        map.put("machineCodes", machineCodesList);
+
         return map;
     }
 }

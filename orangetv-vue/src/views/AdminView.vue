@@ -1032,6 +1032,8 @@ async function handleImportData() {
                 <th class="text-left py-3 px-2 font-medium text-gray-500 dark:text-gray-400">用户</th>
                 <th class="text-left py-3 px-2 font-medium text-gray-500 dark:text-gray-400">角色</th>
                 <th class="text-left py-3 px-2 font-medium text-gray-500 dark:text-gray-400">状态</th>
+                <th class="text-left py-3 px-2 font-medium text-gray-500 dark:text-gray-400">设备码</th>
+                <th class="text-left py-3 px-2 font-medium text-gray-500 dark:text-gray-400">最后登录</th>
                 <th class="text-right py-3 px-2 font-medium text-gray-500 dark:text-gray-400">操作</th>
             </tr>
           </thead>
@@ -1059,6 +1061,21 @@ async function handleImportData() {
                 <span :class="['inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium', user.banned ? 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-200' : 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-200']">
                   {{ user.banned ? '已封禁' : '正常' }}
                 </span>
+              </td>
+              <td class="py-3 px-2">
+                <div v-if="user.machineCodes && user.machineCodes.length > 0" class="text-xs">
+                  <div v-for="(mc, idx) in user.machineCodes.slice(0, 2)" :key="idx" class="truncate max-w-[120px]">
+                    {{ mc.machineCode.substring(0, 16) }}...
+                  </div>
+                  <span v-if="user.machineCodes.length > 2" class="text-gray-400">+{{ user.machineCodes.length - 2 }} 更多</span>
+                </div>
+                <span v-else class="text-gray-400 text-xs">未绑定</span>
+              </td>
+              <td class="py-3 px-2">
+                <span v-if="user.lastLoginAt" class="text-xs text-gray-600 dark:text-gray-400">
+                  {{ new Date(user.lastLoginAt).toLocaleString('zh-CN') }}
+                </span>
+                <span v-else class="text-gray-400 text-xs">从未登录</span>
               </td>
               <td class="py-3 px-2">
                 <div v-if="user.role !== 'owner'" class="flex items-center justify-end gap-1 flex-wrap">

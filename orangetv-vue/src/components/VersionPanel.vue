@@ -157,7 +157,7 @@ function isCurrentVersion(entry: ChangelogEntry | RemoteChangelogEntry) {
                     <p class="text-xs sm:text-sm text-yellow-700 dark:text-yellow-300 break-all">v{{ CURRENT_VERSION }} → v{{ latestVersion }}</p>
                   </div>
                 </div>
-                <a href="https://github.com/djteang/OrangeTV" target="_blank" rel="noopener noreferrer" class="inline-flex items-center justify-center gap-2 px-3 py-2 bg-yellow-600 hover:bg-yellow-700 text-white text-xs sm:text-sm rounded-lg transition-colors shadow-sm w-full">
+                <a href="https://github.com/djteang/orangetv-java-vue" target="_blank" rel="noopener noreferrer" class="inline-flex items-center justify-center gap-2 px-3 py-2 bg-yellow-600 hover:bg-yellow-700 text-white text-xs sm:text-sm rounded-lg transition-colors shadow-sm w-full">
                   <Download class="w-3 h-3 sm:w-4 sm:h-4" />
                   前往仓库
                 </a>
@@ -176,7 +176,7 @@ function isCurrentVersion(entry: ChangelogEntry | RemoteChangelogEntry) {
                     <p class="text-xs sm:text-sm text-blue-700 dark:text-blue-300 break-all">已是最新版本 v{{ CURRENT_VERSION }}</p>
                   </div>
                 </div>
-                <a href="https://github.com/djteang/OrangeTV" target="_blank" rel="noopener noreferrer" class="inline-flex items-center justify-center gap-2 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs sm:text-sm rounded-lg transition-colors shadow-sm w-full">
+                <a href="https://github.com/djteang/orangetv-java-vue" target="_blank" rel="noopener noreferrer" class="inline-flex items-center justify-center gap-2 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs sm:text-sm rounded-lg transition-colors shadow-sm w-full">
                   <CheckCircle class="w-3 h-3 sm:w-4 sm:h-4" />
                   前往仓库
                 </a>

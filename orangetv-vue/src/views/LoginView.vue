@@ -140,7 +140,14 @@ async function handleLinuxDoLogin() {
   linuxDoLoading.value = true
   try {
     const baseURL = import.meta.env.VITE_API_BASE_URL || '/api'
-    const response = await fetch(`${baseURL}/auth/linuxdo/auth-url`, {
+
+    // 构建请求参数，如果需要设备码则携带
+    let url = `${baseURL}/auth/linuxdo/auth-url`
+    if (siteStore.requireDeviceCode && machineCode.value) {
+      url += `?machineCode=${encodeURIComponent(machineCode.value)}`
+    }
+
+    const response = await fetch(url, {
       headers: {
         'Content-Type': 'application/json'
       }
@@ -159,7 +166,7 @@ async function handleLinuxDoLogin() {
 }
 
 function openGithub() {
-  window.open('https://github.com/djteang/OrangeTV', '_blank')
+  window.open('https://github.com/djteang/orangetv-java-vue', '_blank')
 }
 </script>
 
@@ -270,7 +277,7 @@ function openGithub() {
         <!-- 登录按钮 -->
         <button
           type="submit"
-          :disabled="!password || !username || loading"
+          :disabled="!password || !username || loading || (siteStore.requireDeviceCode && machineCodeGenerated && !bindMachineCode)"
           class="inline-flex w-full justify-center rounded-lg bg-blue-600 py-3 text-base font-semibold text-white shadow-lg transition-all duration-200 hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {{ loading ? '登录中...' : '登录' }}
@@ -290,7 +297,7 @@ function openGithub() {
           <button
             type="button"
             @click="handleLinuxDoLogin"
-            :disabled="loading || linuxDoLoading"
+            :disabled="loading || linuxDoLoading || (siteStore.requireDeviceCode && machineCodeGenerated && !bindMachineCode)"
             class="mt-4 w-full flex items-center justify-center gap-2 px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <img v-if="!linuxDoLoading" src="/linuxdo.png" alt="LinuxDo" class="w-5 h-5" />
