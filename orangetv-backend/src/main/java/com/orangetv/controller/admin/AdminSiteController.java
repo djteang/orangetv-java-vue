@@ -49,6 +49,13 @@ public class AdminSiteController {
             siteConfigService.setConfig("enable_linuxdo_login",
                     String.valueOf(request.get("EnableLinuxDoLogin")), "boolean", null);
         }
+        if (request.containsKey("EnableDanmu")) {
+            siteConfigService.setConfig("enable_danmu",
+                    String.valueOf(request.get("EnableDanmu")), "boolean", null);
+        }
+        if (request.containsKey("DanmuApiUrl")) {
+            siteConfigService.setConfig("danmu_api_url", (String) request.get("DanmuApiUrl"));
+        }
 
         return ResponseEntity.ok(ApiResponse.success());
     }

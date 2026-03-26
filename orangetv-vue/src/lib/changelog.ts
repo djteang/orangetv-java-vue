@@ -8,6 +8,13 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: '9.0.1',
+    date: '2026-03-26',
+    added: ['聚合LogVar 弹幕 API 服务器'],
+    changed: [],
+    fixed: ['优化观看记录的保存频率', '首页的继续观看部分进度条显示'],
+  },
+  {
     version: '9.0.0',
     date: '2026-03-17',
     added: ['统计面板','一起看功能','LinuxDo登录'],

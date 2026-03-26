@@ -9,15 +9,18 @@ import { getVideoDetail, getVideoPlayUrl, search } from '@/api/search'
 import type { SearchResult } from '@/types'
 import { Heart, Users, Check, X, Share2, UserPlus, Link } from 'lucide-vue-next'
 import { useAuthStore } from '@/stores/auth'
+import { useSiteStore } from '@/stores/site'
 import request from '@/api/index'
 import { useWebSocket } from '@/services/websocket'
 import Artplayer from 'artplayer'
+import artplayerPluginDanmuku from 'artplayer-plugin-danmuku'
 import Hls from 'hls.js'
 
 const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
 const authStore = useAuthStore()
+const siteStore = useSiteStore()
 const toast = useToast()
 
 const playerRef = ref<HTMLDivElement | null>(null)
@@ -43,6 +46,10 @@ const isEpisodeSelectorCollapsed = ref(false)
 const isVideoLoading = ref(true)
 const videoLoadingStage = ref<'initing' | 'sourceChanging'>('initing')
 
+// 播放记录保存节流
+let lastSaveTime = 0
+const SAVE_INTERVAL = 5000 // 5秒保存一次
+
 // 换源相关
 const availableSources = ref<SearchResult[]>([])
 const sourceSearchLoading = ref(false)
@@ -62,6 +69,80 @@ const selectedFriends = ref<string[]>([])
 const loadingFriends = ref(false)
 const sendingInvite = ref(false)
 const { sendMessage: wsSendMessage } = useWebSocket()
+
+// 弹幕相关
+const enableDanmaku = computed(() => siteStore.enableDanmu && !!siteStore.danmuApiUrl)
+
+// 获取弹幕数据（本地 + 外部合并）
+async function fetchDanmaku(): Promise<{ text: string; time: number; color: string; mode: 0 | 1 | 2 }[]> {
+  const results: { text: string; time: number; color: string; mode: 0 | 1 | 2 }[] = []
+
+  // 1. 从后端 DanmuController 获取本地弹幕
+  try {
+    const danmuVideoId = `${videoTitle.value}_ep${currentEpisode.value}`
+    const data = await request.get(`/danmu?id=${encodeURIComponent(danmuVideoId)}`) as any[]
+    if (Array.isArray(data)) {
+      data.forEach((item: any) => {
+        results.push({
+          text: item.content || '',
+          time: item.time || 0,
+          color: item.color || '#FFFFFF',
+          mode: (item.type === 1 ? 1 : item.type === 2 ? 2 : 0) as 0 | 1 | 2,
+        })
+      })
+    }
+  } catch (e) {
+    console.error('获取本地弹幕失败:', e)
+  }
+
+  // 2. 从外部弹幕 API 获取
+  if (siteStore.danmuApiUrl && videoTitle.value) {
+    try {
+      const apiUrl = siteStore.danmuApiUrl
+      // 搜索匹配的剧集
+      const searchRes = await fetch(`${apiUrl}/api/v2/search/episodes?anime=${encodeURIComponent(videoTitle.value)}`)
+      const searchData = await searchRes.json()
+
+      if (searchData.animes && searchData.animes.length > 0) {
+        const anime = searchData.animes[0]
+        const episodeIndex = currentEpisode.value || 0
+
+        if (anime.episodes && anime.episodes.length > episodeIndex) {
+          const episode = anime.episodes[episodeIndex]
+
+          // 获取弹幕：优先使用 url 参数，否则使用 episodeId
+          let commentUrl: string
+          if (episode.url) {
+            commentUrl = `${apiUrl}/api/v2/comment?url=${encodeURIComponent(episode.url)}&format=json`
+          } else {
+            commentUrl = `${apiUrl}/api/v2/comment/${episode.episodeId}?format=json`
+          }
+
+          const commentRes = await fetch(commentUrl)
+          const commentData = await commentRes.json()
+
+          if (commentData.comments) {
+            commentData.comments.forEach((c: any) => {
+              const parts = c.p?.split(',') || []
+              results.push({
+                text: c.m || '',
+                time: parseFloat(parts[0] || '0'),
+                color: `#${parseInt(parts[2] || '16777215').toString(16).padStart(6, '0')}`,
+                mode: (parseInt(parts[1] || '0') === 4 || parseInt(parts[1] || '0') === 5) ? (parseInt(parts[1]) === 5 ? 1 : 2) as 0 | 1 | 2 : 0,
+              })
+            })
+            console.log(`从外部API获取到 ${commentData.comments.length} 条弹幕`)
+          }
+        }
+      }
+    } catch (e) {
+      console.error('获取外部弹幕失败:', e)
+    }
+  }
+
+  console.log(`弹幕加载完成，共 ${results.length} 条`)
+  return results
+}
 
 // 加载好友列表
 async function loadFriends() {
@@ -452,11 +533,34 @@ async function fetchPlayUrl() {
 function initPlayer() {
   if (!playerRef.value || !playUrl.value) return
 
-  // 如果已有播放器实例，用 switch 切换
+  // 如果已有播放器实例，用 switch 切换，并重新加载弹幕
   if (artInstance.value) {
     artInstance.value.switchUrl(playUrl.value)
     isVideoLoading.value = false
+    // 切换视频后重新加载弹幕
+    if (enableDanmaku.value && artInstance.value.plugins?.artplayerPluginDanmuku) {
+      (artInstance.value.plugins.artplayerPluginDanmuku as any).load()
+    }
     return
+  }
+
+  const plugins: any[] = []
+
+  // 如果启用弹幕，添加弹幕插件
+  if (enableDanmaku.value) {
+    plugins.push(
+      artplayerPluginDanmuku({
+        danmuku: fetchDanmaku,
+        speed: 7,
+        opacity: 1,
+        fontSize: 22,
+        color: '#FFFFFF',
+        mode: 0,
+        antiOverlap: true,
+        synchronousPlayback: false,
+        emitter: false,
+      })
+    )
   }
 
   artInstance.value = new Artplayer({
@@ -483,6 +587,7 @@ function initPlayer() {
     fastForward: true,
     autoOrientation: true,
     lock: true,
+    plugins,
     moreVideoAttr: {
       crossOrigin: 'anonymous',
     },
@@ -529,6 +634,11 @@ function savePlayRecord() {
   const currentTime = player.currentTime || 0
   const duration = player.duration || 0
   if (currentTime < 1 || !duration) return
+
+  // 节流：5秒内只保存一次
+  const now = Date.now()
+  if (now - lastSaveTime < SAVE_INTERVAL) return
+  lastSaveTime = now
 
   const key = `${actualSource.value}+${actualId.value}`
   userStore.savePlayRecord(key, {
@@ -1248,3 +1358,15 @@ watch(isVideoLoading, (val) => {
     </Teleport>
   </PageLayout>
 </template>
+
+<style>
+/* 隐藏弹幕配置面板，但保留开关按钮 */
+.apd-config {
+  display: none !important;
+}
+
+/* 确保弹幕开关按钮显示 */
+.apd-toggle {
+  display: block !important;
+}
+</style>

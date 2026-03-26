@@ -9,6 +9,8 @@ interface ServerConfig {
   storageType: string
   announcement?: string
   enableLinuxDoLogin?: boolean
+  enableDanmu?: boolean
+  danmuApiUrl?: string
 }
 
 export const useSiteStore = defineStore('site', () => {
@@ -18,6 +20,8 @@ export const useSiteStore = defineStore('site', () => {
   const requireDeviceCode = ref(false)
   const allowRegistration = ref(true)
   const enableLinuxDoLogin = ref(false)
+  const enableDanmu = ref(false)
+  const danmuApiUrl = ref('')
   const loading = ref(false)
 
   async function fetchConfig() {
@@ -30,6 +34,8 @@ export const useSiteStore = defineStore('site', () => {
         requireDeviceCode.value = config.requireDeviceCode ?? false
         allowRegistration.value = config.allowRegistration ?? true
         enableLinuxDoLogin.value = config.enableLinuxDoLogin ?? false
+        enableDanmu.value = config.enableDanmu ?? false
+        danmuApiUrl.value = config.danmuApiUrl ?? ''
       }
     } catch {
       // use defaults
@@ -45,6 +51,8 @@ export const useSiteStore = defineStore('site', () => {
     requireDeviceCode,
     allowRegistration,
     enableLinuxDoLogin,
+    enableDanmu,
+    danmuApiUrl,
     loading,
     fetchConfig,
   }

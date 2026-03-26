@@ -75,6 +75,8 @@ const siteSettings = ref({
   DisableYellowFilter: false,
   FluidSearch: true,
   EnableLinuxDoLogin: false,
+  EnableDanmu: false,
+  DanmuApiUrl: '',
   SearchDownstreamMaxPage: 1,
   SiteInterfaceCacheTime: 7200,
 })
@@ -89,6 +91,8 @@ watch(siteConfig, (cfg) => {
       DisableYellowFilter: !!cfg.disable_yellow_filter,
       FluidSearch: cfg.fluid_search !== undefined ? !!cfg.fluid_search : true,
       EnableLinuxDoLogin: !!(cfg as any).enable_linuxdo_login,
+      EnableDanmu: !!(cfg as any).enable_danmu,
+      DanmuApiUrl: (cfg as any).danmu_api_url || '',
       SearchDownstreamMaxPage: (cfg.search_downstream_max_page as number) || 1,
       SiteInterfaceCacheTime: (cfg.site_interface_cache_time as number) || 7200,
     }
@@ -973,6 +977,22 @@ async function handleImportData() {
         </button>
       </div>
                 <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">允许用户使用 LinuxDO 账号登录（需要信任等级 2+）</p>
+    </div>
+    <!-- 启用弹幕功能 -->
+                <div>
+                <div class="flex items-center justify-between">
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">启用弹幕功能</label>
+                <button type="button" @click="siteSettings.EnableDanmu = !siteSettings.EnableDanmu" :class="['relative inline-flex h-6 w-11 items-center rounded-full transition-colors', siteSettings.EnableDanmu ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-700']">
+                <span :class="['inline-block h-4 w-4 transform rounded-full bg-white transition-transform', siteSettings.EnableDanmu ? 'translate-x-6' : 'translate-x-1']" />
+        </button>
+      </div>
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">启用后视频播放器将显示弹幕功能</p>
+    </div>
+    <!-- 弹幕 API 地址 -->
+                <div v-if="siteSettings.EnableDanmu">
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">弹幕 API 地址</label>
+                <input v-model="siteSettings.DanmuApiUrl" type="text" placeholder="例如: http://192.168.1.7:9321/87654321" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-transparent" />
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">兼容弹弹play接口规范的弹幕API服务器地址</p>
     </div>
     <!-- 保存按钮 -->
                 <div class="flex justify-end">

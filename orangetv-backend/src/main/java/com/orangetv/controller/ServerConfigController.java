@@ -50,6 +50,15 @@ public class ServerConfigController {
         boolean actuallyEnabled = enableLinuxDoLogin && linuxDoClientId != null && !linuxDoClientId.isEmpty();
         config.put("enableLinuxDoLogin", actuallyEnabled);
 
+        // 弹幕配置
+        Boolean enableDanmu = siteConfigService.getBooleanConfig("enable_danmu", false);
+        config.put("enableDanmu", enableDanmu);
+        config.put("enable_danmu", enableDanmu);
+
+        String danmuApiUrl = siteConfigService.getConfigValue("danmu_api_url");
+        config.put("danmuApiUrl", danmuApiUrl != null ? danmuApiUrl : "");
+        config.put("danmu_api_url", danmuApiUrl != null ? danmuApiUrl : "");
+
         return ResponseEntity.ok(config);
     }
 }

@@ -20,6 +20,7 @@ interface Props {
   currentEpisode?: number
   sourceCount?: number
   sources?: { source: string; source_name: string; id: string }[]
+  progress?: number
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -42,7 +43,7 @@ const showSourceCount = computed(() => props.sourceCount && props.sourceCount > 
 
 const episodeText = computed(() => {
   if (props.currentEpisode !== undefined) {
-    return `${props.currentEpisode}/${props.episodes}`
+    return `${props.currentEpisode + 1}/${props.episodes}`
   }
   return props.episodes.toString()
 })
@@ -84,6 +85,10 @@ function handleClick() {
     if (props.year) query.year = props.year
     if (props.query) query.stitle = props.query.trim()
     if (props.type) query.stype = props.type
+    // 如果有当前集数，传递 episode 参数
+    if (props.currentEpisode !== undefined) {
+      query.episode = props.currentEpisode.toString()
+    }
     router.push({ path: '/play', query })
   } else {
     // 兜底：按标题跳转播放页
@@ -194,6 +199,17 @@ const posterUrl = computed(() => {
           <LinkIcon :size="16" />
         </div>
       </a>
+
+      <!-- 观看进度条 -->
+      <div
+        v-if="progress !== undefined && progress > 0"
+        class="absolute bottom-0 left-0 right-0 h-1 bg-gray-800/50"
+      >
+        <div
+          class="h-full bg-blue-500 transition-all duration-300"
+          :style="{ width: `${Math.min(progress, 100)}%` }"
+        ></div>
+      </div>
     </div>
 
     <!-- 标题与来源 -->
