@@ -99,8 +99,9 @@ async function fetchDanmaku(): Promise<{ text: string; time: number; color: stri
   if (siteStore.danmuApiUrl && videoTitle.value) {
     try {
       const apiUrl = siteStore.danmuApiUrl
-      // 搜索匹配的剧集
-      const searchRes = await fetch(`${apiUrl}/api/v2/search/episodes?anime=${encodeURIComponent(videoTitle.value)}`)
+      // 搜索匹配的剧集 - 通过后端代理避免 Mixed Content 错误
+      const searchUrl = `${apiUrl}/api/v2/search/episodes?anime=${encodeURIComponent(videoTitle.value)}`
+      const searchRes = await fetch(`/api/danmu/proxy?url=${encodeURIComponent(searchUrl)}`)
       const searchData = await searchRes.json()
 
       if (searchData.animes && searchData.animes.length > 0) {
@@ -118,7 +119,8 @@ async function fetchDanmaku(): Promise<{ text: string; time: number; color: stri
             commentUrl = `${apiUrl}/api/v2/comment/${episode.episodeId}?format=json`
           }
 
-          const commentRes = await fetch(commentUrl)
+          // 通过后端代理获取弹幕数据
+          const commentRes = await fetch(`/api/danmu/proxy?url=${encodeURIComponent(commentUrl)}`)
           const commentData = await commentRes.json()
 
           if (commentData.comments) {

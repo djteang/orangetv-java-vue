@@ -56,6 +56,7 @@ public class SecurityConfig {
                         .requestMatchers("/api/image-proxy").permitAll()
                         .requestMatchers("/api/avatar").permitAll()
                         .requestMatchers("/api/live/proxy").permitAll()
+                        .requestMatchers("/api/danmu/proxy").permitAll()
 
                         // 搜索端点 - 需要认证
                         .requestMatchers("/api/search/**").authenticated()
