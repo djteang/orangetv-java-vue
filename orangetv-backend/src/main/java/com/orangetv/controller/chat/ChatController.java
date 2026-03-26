@@ -81,9 +81,12 @@ public class ChatController {
     }
 
     @GetMapping("/search-users")
-    public ResponseEntity<List<Map<String, Object>>> searchUsers(@RequestParam String q) {
+    public ResponseEntity<List<Map<String, Object>>> searchUsers(
+            @RequestParam String q,
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "20") int size) {
         Long userId = SecurityUtils.getCurrentUserId();
-        return ResponseEntity.ok(chatService.searchUsers(userId, q));
+        return ResponseEntity.ok(chatService.searchUsers(userId, q, page, size));
     }
 
     @GetMapping("/online-users")

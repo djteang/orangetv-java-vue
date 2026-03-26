@@ -280,7 +280,7 @@ public class ChatService {
     }
 
     @Transactional(readOnly = true)
-    public List<Map<String, Object>> searchUsers(Long currentUserId, String keyword) {
+    public List<Map<String, Object>> searchUsers(Long currentUserId, String keyword, int page, int size) {
         List<User> users = userRepository.searchByKeyword(keyword);
         // 获取当前用户的好友列表
         List<User> friends = friendRepository.findFriendsByUserId(currentUserId);
@@ -288,7 +288,8 @@ public class ChatService {
 
         return users.stream()
                 .filter(u -> !u.getId().equals(currentUserId)) // 排除自己
-                .limit(20)
+                .skip((long) (page - 1) * size) // 跳过前面的页
+                .limit(size) // 限制每页数量
                 .map(u -> {
                     Map<String, Object> map = new HashMap<>();
                     map.put("id", u.getId());

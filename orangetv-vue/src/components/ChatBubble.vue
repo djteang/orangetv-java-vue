@@ -74,6 +74,10 @@ const searchResults = ref<{ id: number; username: string; avatar?: string; isFri
 const searching = ref(false)
 const sendingRequest = ref<number | null>(null)
 const hasSearched = ref(false) // 标记是否已进行过搜索
+const currentPage = ref(1)
+const pageSize = 20
+const hasMore = ref(true)
+const loadingMore = ref(false)
 
 // Chat window state
 const activeChatFriend = ref<string | null>(null)
@@ -146,20 +150,61 @@ async function handleWatchInvite(invite: WatchInvite, accept: boolean) {
 }
 
 // Search users for adding friends
-async function searchUsers() {
+async function searchUsers(loadMore = false) {
   if (!searchKeyword.value.trim()) return
-  searching.value = true
+
+  if (loadMore) {
+    if (!hasMore.value || loadingMore.value) return
+    loadingMore.value = true
+  } else {
+    searching.value = true
+    currentPage.value = 1
+    searchResults.value = []
+    hasMore.value = true
+  }
+
   hasSearched.value = false
   try {
-    const data = await request.get(`/chat/search-users?q=${encodeURIComponent(searchKeyword.value)}`)
-    // 后端已经过滤自己并返回好友状态
-    searchResults.value = (data as unknown as any[]) || []
+    const data = await request.get(`/chat/search-users?q=${encodeURIComponent(searchKeyword.value)}&page=${currentPage.value}&size=${pageSize}`)
+    const results = (data as unknown as any[]) || []
+
+    if (loadMore) {
+      searchResults.value = [...searchResults.value, ...results]
+    } else {
+      searchResults.value = results
+    }
+
+    hasMore.value = results.length === pageSize
     hasSearched.value = true
+
+    if (loadMore) {
+      currentPage.value++
+    }
   } catch {
-    searchResults.value = []
+    if (!loadMore) {
+      searchResults.value = []
+    }
     hasSearched.value = true
+    hasMore.value = false
   } finally {
-    searching.value = false
+    if (loadMore) {
+      loadingMore.value = false
+    } else {
+      searching.value = false
+    }
+  }
+}
+
+// Handle scroll for lazy loading
+function handleSearchScroll(e: Event) {
+  const target = e.target as HTMLElement
+  const scrollTop = target.scrollTop
+  const scrollHeight = target.scrollHeight
+  const clientHeight = target.clientHeight
+
+  // 当滚动到底部附近时加载更多
+  if (scrollHeight - scrollTop - clientHeight < 100) {
+    searchUsers(true)
   }
 }
 
@@ -308,13 +353,17 @@ onUnmounted(() => {
                   placeholder="输入用户名搜索"
                   class="flex-1 px-3 py-2 text-sm bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-500 rounded-lg border-none focus:ring-2 focus:ring-blue-500 outline-none"
                 />
-                <button @click="searchUsers" :disabled="searching || !searchKeyword.trim()" class="px-3 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50 transition-colors">
+                <button @click="() => searchUsers(false)" :disabled="searching || !searchKeyword.trim()" class="px-3 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50 transition-colors">
                   <Search v-if="!searching" class="w-4 h-4" />
                   <Loader2 v-else class="w-4 h-4 animate-spin" />
                 </button>
               </div>
               <!-- Search Results -->
-              <div v-if="searchResults.length > 0" class="mt-3 space-y-2">
+              <div
+                v-if="searchResults.length > 0"
+                class="mt-3 max-h-[300px] overflow-y-auto space-y-2"
+                @scroll="handleSearchScroll"
+              >
                 <div v-for="user in searchResults" :key="user.id" class="flex items-center gap-3 p-2 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
                   <img
                     v-if="user.avatar"
@@ -339,6 +388,10 @@ onUnmounted(() => {
                     <Loader2 v-if="sendingRequest === user.id" class="w-3 h-3 animate-spin" />
                     <span v-else>添加</span>
                   </button>
+                </div>
+                <!-- 加载更多指示器 -->
+                <div v-if="loadingMore" class="flex items-center justify-center py-2">
+                  <Loader2 class="w-4 h-4 animate-spin text-blue-500" />
                 </div>
               </div>
               <div v-else-if="hasSearched && !searching" class="mt-3 text-center text-sm text-gray-400">
