@@ -1,76 +1,91 @@
 import { defineStore } from 'pinia'
-import { ref, watch } from 'vue'
+import { computed, onScopeDispose, ref, watch } from 'vue'
 
-export type ThemeMode = 'light' | 'dark' | 'system'
+const themeModes = ['light', 'dark', 'chinese-red', 'system'] as const
+export type ThemeMode = (typeof themeModes)[number]
+type ResolvedTheme = Exclude<ThemeMode, 'system'>
+
+const themeColors: Record<ResolvedTheme, string> = {
+  light: '#ffffff',
+  dark: '#111827',
+  'chinese-red': '#fff8f0',
+}
+
+function readStoredMode(): ThemeMode {
+  try {
+    const saved = localStorage.getItem('theme')
+    if (themeModes.includes(saved as ThemeMode)) return saved as ThemeMode
+  } catch {
+    // 禁用本地存储时，仍可在当前页面切换主题。
+  }
+  return 'system'
+}
 
 export const useThemeStore = defineStore('theme', () => {
-  const mode = ref<ThemeMode>((localStorage.getItem('theme') as ThemeMode) || 'system')
-  const isDark = ref(false)
+  const mode = ref<ThemeMode>(readStoredMode())
+  const systemPreference = window.matchMedia('(prefers-color-scheme: dark)')
+  const systemIsDark = ref(systemPreference.matches)
+  const resolvedMode = computed<ResolvedTheme>(() => mode.value === 'system'
+    ? (systemIsDark.value ? 'dark' : 'light')
+    : mode.value)
+  const isDark = computed(() => resolvedMode.value === 'dark')
+  let initialized = false
 
-  function updateDarkClass() {
-    if (mode.value === 'dark') {
-      isDark.value = true
-    } else if (mode.value === 'light') {
-      isDark.value = false
-    } else {
-      isDark.value = window.matchMedia('(prefers-color-scheme: dark)').matches
-    }
+  function applyTheme() {
+    const root = document.documentElement
+    root.classList.toggle('dark', isDark.value)
+    root.dataset.theme = resolvedMode.value
+    root.style.colorScheme = isDark.value ? 'dark' : 'light'
 
-    if (isDark.value) {
-      document.documentElement.classList.add('dark')
-    } else {
-      document.documentElement.classList.remove('dark')
+    let meta = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')
+    if (!meta) {
+      meta = document.createElement('meta')
+      meta.name = 'theme-color'
+      document.head.appendChild(meta)
     }
-
-    // 更新 meta theme-color
-    const meta = document.querySelector('meta[name="theme-color"]')
-    const color = isDark.value ? '#0c111c' : '#f9fbfe'
-    if (meta) {
-      meta.setAttribute('content', color)
-    } else {
-      const newMeta = document.createElement('meta')
-      newMeta.name = 'theme-color'
-      newMeta.content = color
-      document.head.appendChild(newMeta)
-    }
+    meta.content = themeColors[resolvedMode.value]
   }
 
   function setMode(newMode: ThemeMode) {
-    mode.value = newMode
-    localStorage.setItem('theme', newMode)
-    updateDarkClass()
-  }
+    if (mode.value === newMode) return
 
-  function toggle() {
-    const targetMode: ThemeMode = isDark.value ? 'light' : 'dark'
+    const update = () => {
+      mode.value = newMode
+      try {
+        localStorage.setItem('theme', newMode)
+      } catch {
+        // 本地存储不可用不应阻止主题生效。
+      }
+    }
 
-    // 使用 View Transitions API（如果支持）
-    if ((document as any).startViewTransition) {
-      (document as any).startViewTransition(() => {
-        setMode(targetMode)
-      })
+    const transitionDocument = document as Document & {
+      startViewTransition?: (callback: () => void) => unknown
+    }
+    if (transitionDocument.startViewTransition && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      transitionDocument.startViewTransition(update)
     } else {
-      setMode(targetMode)
+      update()
     }
   }
 
-  // 监听系统主题变化
+  function toggle() {
+    const themes: ResolvedTheme[] = ['light', 'dark', 'chinese-red']
+    setMode(themes[(themes.indexOf(resolvedMode.value) + 1) % themes.length])
+  }
+
+  function handleSystemChange(event: MediaQueryListEvent) {
+    systemIsDark.value = event.matches
+  }
+
   function init() {
-    updateDarkClass()
-    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
-      if (mode.value === 'system') {
-        updateDarkClass()
-      }
-    })
+    if (initialized) return
+    initialized = true
+    applyTheme()
+    systemPreference.addEventListener('change', handleSystemChange)
   }
 
-  watch(mode, updateDarkClass)
+  watch(resolvedMode, applyTheme, { flush: 'sync' })
+  onScopeDispose(() => systemPreference.removeEventListener('change', handleSystemChange))
 
-  return {
-    mode,
-    isDark,
-    setMode,
-    toggle,
-    init,
-  }
+  return { mode, resolvedMode, isDark, setMode, toggle, init }
 })

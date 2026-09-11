@@ -1,11 +1,14 @@
 <script setup lang="ts">
 import { ref, onMounted, watch, computed } from 'vue'
-import { ChevronRight } from 'lucide-vue-next'
+import type { Ref } from 'vue'
+import { ChevronRight, X } from 'lucide-vue-next'
 import PageLayout from '@/components/PageLayout.vue'
 import CapsuleSwitch from '@/components/CapsuleSwitch.vue'
 import ScrollableRow from '@/components/ScrollableRow.vue'
 import VideoCard from '@/components/VideoCard.vue'
 import ContinueWatching from '@/components/ContinueWatching.vue'
+import BangumiEmptyState from '@/components/BangumiEmptyState.vue'
+import DiscoveryState from '@/components/DiscoveryState.vue'
 // import { useSiteStore } from '@/stores/site'
 import { useUserStore } from '@/stores/user'
 import { getDoubanCategories } from '@/api/douban'
@@ -20,7 +23,14 @@ const hotMovies = ref<DoubanItem[]>([])
 const hotTvShows = ref<DoubanItem[]>([])
 const hotVarietyShows = ref<DoubanItem[]>([])
 const bangumiCalendarData = ref<BangumiCalendarData[]>([])
-const loading = ref(true)
+const moviesLoading = ref(true)
+const tvShowsLoading = ref(true)
+const varietyShowsLoading = ref(true)
+const bangumiLoading = ref(false)
+const bangumiError = ref(false)
+const moviesError = ref(false)
+const tvShowsError = ref(false)
+const varietyShowsError = ref(false)
 
 // 收藏夹数据
 interface FavoriteItem {
@@ -69,38 +79,55 @@ const todayAnimes = computed(() => {
   return bangumiCalendarData.value.find((item) => item.weekday.en === currentWeekday)?.items || []
 })
 
-async function fetchRecommendData() {
+async function fetchDoubanSection(
+  params: Parameters<typeof getDoubanCategories>[0],
+  items: Ref<DoubanItem[]>,
+  isLoading: Ref<boolean>,
+  failed: Ref<boolean>,
+) {
   try {
-    loading.value = true
-
-    const [moviesData, tvShowsData, varietyShowsData, calendarData] = await Promise.all([
-      getDoubanCategories({ kind: 'movie', category: '热门', type: '全部' }),
-      getDoubanCategories({ kind: 'tv', category: 'tv', type: 'tv' }),
-      getDoubanCategories({ kind: 'tv', category: 'show', type: 'show' }),
-      getBangumiCalendarData(),
-    ])
-
-    if (moviesData.code === 200) {
-      hotMovies.value = moviesData.list
-    }
-    if (tvShowsData.code === 200) {
-      hotTvShows.value = tvShowsData.list
-    }
-    if (varietyShowsData.code === 200) {
-      hotVarietyShows.value = varietyShowsData.list
-    }
-    bangumiCalendarData.value = calendarData
+    isLoading.value = true
+    failed.value = false
+    const data = await getDoubanCategories(params)
+    if (data.code !== 200) throw new Error(data.message || '加载失败')
+    items.value = data.list || []
   } catch (error) {
-    console.error('获取推荐数据失败:', error)
+    items.value = []
+    failed.value = true
+    console.error('获取首页推荐失败:', error)
   } finally {
-    loading.value = false
+    isLoading.value = false
   }
 }
+
+async function fetchBangumiData() {
+  if (bangumiLoading.value) return
+
+  bangumiLoading.value = true
+  bangumiError.value = false
+  try {
+    bangumiCalendarData.value = await getBangumiCalendarData()
+  } catch (error) {
+    bangumiCalendarData.value = []
+    bangumiError.value = true
+    console.error('获取新番放送失败:', error)
+  } finally {
+    bangumiLoading.value = false
+  }
+}
+
+const reloadMovies = () => fetchDoubanSection({ kind: 'movie', category: '热门', type: '全部' }, hotMovies, moviesLoading, moviesError)
+const reloadTv = () => fetchDoubanSection({ kind: 'tv', category: 'tv', type: 'tv' }, hotTvShows, tvShowsLoading, tvShowsError)
+const reloadVariety = () => fetchDoubanSection({ kind: 'tv', category: 'show', type: 'show' }, hotVarietyShows, varietyShowsLoading, varietyShowsError)
 
 async function clearAllFavorites() {
   for (const key of Object.keys(userStore.favorites)) {
     await userStore.deleteFavorite(key)
   }
+}
+
+async function handleDeleteFavorite(source: string, id: string) {
+  await userStore.deleteFavorite(`${source}+${id}`)
 }
 
 watch(activeTab, async (newTab) => {
@@ -111,7 +138,17 @@ watch(activeTab, async (newTab) => {
 })
 
 onMounted(() => {
-  fetchRecommendData()
+  // 各栏目独立更新，单个接口失败或超时不会阻塞其他内容。
+  void fetchDoubanSection(
+    { kind: 'movie', category: '热门', type: '全部' }, hotMovies, moviesLoading, moviesError,
+  )
+  void fetchDoubanSection(
+    { kind: 'tv', category: 'tv', type: 'tv' }, hotTvShows, tvShowsLoading, tvShowsError,
+  )
+  void fetchDoubanSection(
+    { kind: 'tv', category: 'show', type: 'show' }, hotVarietyShows, varietyShowsLoading, varietyShowsError,
+  )
+  void fetchBangumiData()
 })
 </script>
 
@@ -147,7 +184,14 @@ onMounted(() => {
             <div
               class="justify-start grid grid-cols-3 gap-x-2 gap-y-14 sm:gap-y-20 px-0 sm:px-2 sm:grid-cols-[repeat(auto-fill,_minmax(11rem,_1fr))] sm:gap-x-8"
             >
-              <div v-for="item in favoriteItems" :key="item.id + item.source" class="w-full">
+              <div v-for="item in favoriteItems" :key="item.id + item.source" class="relative group/card w-full">
+                <button
+                  class="absolute -top-1.5 -right-1.5 z-[999] w-5 h-5 rounded-full bg-black/60 text-white flex items-center justify-center opacity-0 group-hover/card:opacity-100 transition-opacity duration-200 hover:bg-red-500"
+                  title="取消收藏"
+                  @click.stop="handleDeleteFavorite(item.source, item.id)"
+                >
+                  <X class="w-3 h-3" />
+                </button>
                 <VideoCard
                   :query="item.searchTitle"
                   :id="item.id"
@@ -161,12 +205,7 @@ onMounted(() => {
                   :type="item.episodes > 1 ? 'tv' : ''"
                 />
               </div>
-              <div
-                v-if="favoriteItems.length === 0"
-                class="col-span-full text-center text-gray-500 py-8 dark:text-gray-400"
-              >
-                暂无收藏内容
-              </div>
+              <DiscoveryState v-if="favoriteItems.length === 0" class="col-span-full" variant="favorites" title="暂无收藏内容" description="遇到喜欢的影片，点亮收藏，把好故事留在这里。" action-label="去发现好片" @action="activeTab = 'home'" />
             </div>
           </section>
         </template>
@@ -188,8 +227,9 @@ onMounted(() => {
                 <ChevronRight class="w-4 h-4 ml-1" />
               </router-link>
             </div>
-            <ScrollableRow>
-              <template v-if="loading">
+            <DiscoveryState v-if="!moviesLoading && hotMovies.length === 0" compact variant="movie" :mode="moviesError ? 'error' : 'empty'" :title="moviesError ? '热门电影暂时加载失败' : '暂无热门电影'" description="片库的这一站暂时安静，稍后再来看看新的故事。" action-label="重新加载" @action="reloadMovies" />
+            <ScrollableRow v-else>
+              <template v-if="moviesLoading">
                 <div
                   v-for="index in 8"
                   :key="index"
@@ -235,8 +275,9 @@ onMounted(() => {
                 <ChevronRight class="w-4 h-4 ml-1" />
               </router-link>
             </div>
-            <ScrollableRow>
-              <template v-if="loading">
+            <DiscoveryState v-if="!tvShowsLoading && hotTvShows.length === 0" compact variant="tv" :mode="tvShowsError ? 'error' : 'empty'" :title="tvShowsError ? '热门剧集暂时加载失败' : '暂无热门剧集'" description="片库的这一站暂时安静，稍后再来看看新的故事。" action-label="重新加载" @action="reloadTv" />
+            <ScrollableRow v-else>
+              <template v-if="tvShowsLoading">
                 <div
                   v-for="index in 8"
                   :key="index"
@@ -281,8 +322,13 @@ onMounted(() => {
                 <ChevronRight class="w-4 h-4 ml-1" />
               </router-link>
             </div>
-            <ScrollableRow>
-              <template v-if="loading">
+            <BangumiEmptyState
+              v-if="!bangumiLoading && (bangumiError || todayAnimes.length === 0)"
+              :failed="bangumiError"
+              @retry="fetchBangumiData"
+            />
+            <ScrollableRow v-else>
+              <template v-if="bangumiLoading">
                 <div
                   v-for="index in 8"
                   :key="index"
@@ -328,8 +374,9 @@ onMounted(() => {
                 <ChevronRight class="w-4 h-4 ml-1" />
               </router-link>
             </div>
-            <ScrollableRow>
-              <template v-if="loading">
+            <DiscoveryState v-if="!varietyShowsLoading && hotVarietyShows.length === 0" compact variant="show" :mode="varietyShowsError ? 'error' : 'empty'" :title="varietyShowsError ? '热门综艺暂时加载失败' : '暂无热门综艺'" description="片库的这一站暂时安静，稍后再来看看新的故事。" action-label="重新加载" @action="reloadVariety" />
+            <ScrollableRow v-else>
+              <template v-if="varietyShowsLoading">
                 <div
                   v-for="index in 8"
                   :key="index"

@@ -28,6 +28,9 @@ public class ChatMessageDto {
     @JsonProperty("message_type")
     private String messageType;
 
+    @JsonProperty("voice_duration")
+    private Integer voiceDuration;
+
     private Long timestamp;
 
     @JsonProperty("is_read")

@@ -34,6 +34,8 @@ public interface UserRepository extends JpaRepository<User, Long> {
 
     List<User> findByUsernameIn(Collection<String> usernames);
 
+    long countByLastLoginAtGreaterThanEqual(LocalDateTime dateTime);
+
     // 统计方法
     long countByCreatedAtAfter(LocalDateTime dateTime);
 

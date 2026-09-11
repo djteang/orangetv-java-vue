@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
-import { X, Smile, Image as ImageIcon, Loader2, Wallpaper } from 'lucide-vue-next'
+import { X, Smile, Image as ImageIcon, Loader2, Wallpaper, Mic, Play, Pause } from 'lucide-vue-next'
 import { useAuthStore } from '@/stores/auth'
 import { useWebSocket } from '@/services/websocket'
+import { useToast } from '@/composables/useToast'
 import request from '@/api/index'
 
 interface ChatMessage {
@@ -14,6 +15,7 @@ interface ChatMessage {
   message_type: string
   timestamp: number
   is_read: boolean
+  voice_duration?: number
 }
 
 const props = defineProps<{
@@ -28,6 +30,7 @@ const emit = defineEmits<{
 
 const authStore = useAuthStore()
 const { subscribe } = useWebSocket()
+const toast = useToast()
 
 const messages = ref<ChatMessage[]>([])
 const inputText = ref('')
@@ -38,6 +41,22 @@ const loading = ref(true)
 const sending = ref(false)
 const messagesContainer = ref<HTMLElement | null>(null)
 const previewImageUrl = ref<string | null>(null)
+
+// Voice recording state
+const showRecordingOverlay = ref(false) // 是否显示录音界面
+const isRecording = ref(false)
+const recordingTime = ref(0)
+const mediaRecorder = ref<MediaRecorder | null>(null)
+const audioChunks = ref<Blob[]>([])
+const recordingTimer = ref<number | null>(null)
+const playingVoiceId = ref<number | null>(null)
+const currentAudio = ref<HTMLAudioElement | null>(null)
+const voiceProgress = ref<Record<number, number>>({}) // 每条语音的播放进度
+const recordingStartY = ref(0)
+const recordingCurrentY = ref(0)
+const recordingStatus = ref<'recording' | 'send' | 'cancel'>('recording') // 录音状态
+const isPressingVoiceButton = ref(false) // 是否正在按住语音按钮
+const longPressTimer = ref<number | null>(null) // 长按延迟计时器
 
 // Drag state
 const chatWindowRef = ref<HTMLElement | null>(null)
@@ -280,21 +299,32 @@ async function loadMessages() {
   if (!convId.value) return
   const data = await request.get(`/chat/messages?conversationId=${convId.value}&limit=50`) as any[]
   messages.value = (data || []).reverse()
-  scrollToBottom()
+  // 使用 nextTick 确保 DOM 更新后再滚动
+  await nextTick()
+  // 添加小延迟确保渲染完成
+  setTimeout(() => {
+    scrollToBottom()
+  }, 100)
 }
 
 // Send message
-async function sendMessage(type: 'text' | 'image' = 'text', content?: string) {
+async function sendMessage(type: 'text' | 'image' | 'voice' = 'text', content?: string, voiceDuration?: number) {
   const msgContent = content || inputText.value.trim()
   if (!msgContent || !convId.value) return
 
   sending.value = true
   try {
-    const newMsg = await request.post('/chat/messages', {
+    const payload: any = {
       conversationId: convId.value,
       content: msgContent,
       messageType: type
-    }) as ChatMessage
+    }
+
+    if (type === 'voice' && voiceDuration) {
+      payload.voiceDuration = voiceDuration
+    }
+
+    const newMsg = await request.post('/chat/messages', payload) as ChatMessage
     messages.value.push(newMsg)
     inputText.value = ''
     showEmojiPicker.value = false
@@ -307,6 +337,245 @@ async function sendMessage(type: 'text' | 'image' = 'text', content?: string) {
 // Insert emoji
 function insertEmoji(emoji: string) {
   inputText.value += emoji
+}
+
+// Voice recording functions
+function openRecordingOverlay() {
+  showRecordingOverlay.value = true
+}
+
+function closeRecordingOverlay() {
+  showRecordingOverlay.value = false
+  // 如果正在录音，停止录音
+  if (isRecording.value) {
+    stopRecording()
+  }
+  // 清除长按计时器
+  if (longPressTimer.value) {
+    clearTimeout(longPressTimer.value)
+    longPressTimer.value = null
+  }
+  isPressingVoiceButton.value = false
+}
+
+function onPressStart(e: MouseEvent | TouchEvent) {
+  isPressingVoiceButton.value = true
+
+  // 记录起始位置
+  if (e instanceof MouseEvent) {
+    recordingStartY.value = e.clientY
+    recordingCurrentY.value = e.clientY
+  } else if (e instanceof TouchEvent && e.touches.length > 0) {
+    recordingStartY.value = e.touches[0].clientY
+    recordingCurrentY.value = e.touches[0].clientY
+  }
+
+  // 设置长按延迟（500ms后开始录音）
+  longPressTimer.value = window.setTimeout(() => {
+    startRecording(e)
+  }, 500)
+
+  // 添加松开监听
+  document.addEventListener('mouseup', onPressEnd)
+  document.addEventListener('touchend', onPressEnd)
+}
+
+function onPressEnd() {
+  // 清除长按计时器
+  if (longPressTimer.value) {
+    clearTimeout(longPressTimer.value)
+    longPressTimer.value = null
+  }
+
+  // 如果正在录音，停止录音
+  if (isRecording.value) {
+    stopRecording()
+  } else {
+    // 如果没有开始录音（长按时间不足），关闭录音界面
+    closeRecordingOverlay()
+  }
+
+  isPressingVoiceButton.value = false
+
+  // 移除监听
+  document.removeEventListener('mouseup', onPressEnd)
+  document.removeEventListener('touchend', onPressEnd)
+}
+
+async function startRecording(e: MouseEvent | TouchEvent) {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+    mediaRecorder.value = new MediaRecorder(stream)
+    audioChunks.value = []
+
+    // 设置光标
+    if (e instanceof MouseEvent) {
+      document.body.style.cursor = 'grabbing'
+    }
+
+    mediaRecorder.value.ondataavailable = (event) => {
+      audioChunks.value.push(event.data)
+    }
+
+    mediaRecorder.value.onstop = async () => {
+      const audioBlob = new Blob(audioChunks.value, { type: 'audio/webm' })
+
+      // 根据状态决定是否发送
+      if (recordingStatus.value === 'send' && recordingTime.value >= 1) {
+        await sendVoiceMessage(audioBlob, recordingTime.value)
+      } else if (recordingStatus.value === 'recording' && recordingTime.value < 1) {
+        toast.error('录音时间太短')
+      }
+
+      stream.getTracks().forEach(track => track.stop())
+      document.body.style.cursor = ''
+    }
+
+    mediaRecorder.value.start()
+    isRecording.value = true
+    recordingTime.value = 0
+    recordingStatus.value = 'recording'
+
+    recordingTimer.value = window.setInterval(() => {
+      recordingTime.value++
+      if (recordingTime.value >= 60) {
+        stopRecording()
+      }
+    }, 1000)
+
+    // 添加移动监听
+    document.addEventListener('mousemove', onRecordingMove)
+    document.addEventListener('touchmove', onRecordingMove)
+  } catch (error) {
+    console.error('Failed to start recording:', error)
+    toast.error('无法访问麦克风，请检查权限设置')
+    isPressingVoiceButton.value = false
+    document.body.style.cursor = ''
+  }
+}
+
+function onRecordingMove(e: MouseEvent | TouchEvent) {
+  if (!isRecording.value) return
+
+  let currentY = 0
+  if (e instanceof MouseEvent) {
+    currentY = e.clientY
+  } else if (e instanceof TouchEvent && e.touches.length > 0) {
+    currentY = e.touches[0].clientY
+  }
+
+  recordingCurrentY.value = currentY
+  const deltaY = recordingStartY.value - currentY
+
+  // 上滑超过50px表示发送
+  if (deltaY > 50) {
+    recordingStatus.value = 'send'
+  }
+  // 下滑超过50px表示取消
+  else if (deltaY < -50) {
+    recordingStatus.value = 'cancel'
+  } else {
+    recordingStatus.value = 'recording'
+  }
+}
+
+function stopRecording() {
+  if (mediaRecorder.value && isRecording.value) {
+    mediaRecorder.value.stop()
+    isRecording.value = false
+    isPressingVoiceButton.value = false
+    if (recordingTimer.value) {
+      clearInterval(recordingTimer.value)
+      recordingTimer.value = null
+    }
+
+    // 移除移动监听
+    document.removeEventListener('mousemove', onRecordingMove)
+    document.removeEventListener('touchmove', onRecordingMove)
+    document.body.style.cursor = ''
+
+    // 关闭录音界面
+    setTimeout(() => {
+      closeRecordingOverlay()
+    }, 300)
+  }
+}
+
+async function sendVoiceMessage(audioBlob: Blob, duration: number) {
+  try {
+    const formData = new FormData()
+    formData.append('file', audioBlob, 'voice.webm')
+
+    const uploadRes = await request.post('/upload/voice', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    }) as { url: string }
+
+    await sendMessage('voice', uploadRes.url, duration)
+  } catch (error) {
+    console.error('Failed to send voice message:', error)
+    toast.error('语音发送失败')
+  }
+}
+
+function playVoice(messageId: number, voiceUrl: string, duration: number) {
+  // 如果正在播放同一条语音，暂停
+  if (playingVoiceId.value === messageId && currentAudio.value) {
+    currentAudio.value.pause()
+    playingVoiceId.value = null
+    return
+  }
+
+  // 停止之前的音频
+  if (currentAudio.value) {
+    currentAudio.value.pause()
+    currentAudio.value = null
+  }
+
+  const audio = new Audio(voiceUrl)
+  currentAudio.value = audio
+  playingVoiceId.value = messageId
+
+  // 初始化进度
+  if (!voiceProgress.value[messageId]) {
+    voiceProgress.value[messageId] = 0
+  }
+
+  // 设置开始播放位置（如果之前暂停过）
+  const startProgress = voiceProgress.value[messageId]
+  if (startProgress > 0 && duration > 0) {
+    audio.currentTime = (startProgress / 100) * duration
+  }
+
+  // 更新进度
+  const updateProgress = () => {
+    if (audio.currentTime && duration > 0) {
+      voiceProgress.value[messageId] = (audio.currentTime / duration) * 100
+    }
+  }
+
+  audio.ontimeupdate = updateProgress
+
+  audio.onended = () => {
+    playingVoiceId.value = null
+    currentAudio.value = null
+    voiceProgress.value[messageId] = 0
+  }
+
+  audio.onerror = () => {
+    playingVoiceId.value = null
+    currentAudio.value = null
+    toast.error('语音播放失败')
+  }
+
+  audio.play().catch(() => {
+    playingVoiceId.value = null
+    currentAudio.value = null
+    toast.error('语音播放失败')
+  })
+}
+
+function formatRecordingTime(seconds: number): string {
+  return `${Math.floor(seconds / 60)}:${(seconds % 60).toString().padStart(2, '0')}`
 }
 
 // Handle image upload
@@ -479,7 +748,7 @@ watch(() => props.conversationId, (newId) => {
             :src="friendAvatar"
             class="w-10 h-10 rounded-full object-cover"
           />
-          <div v-else class="w-10 h-10 rounded-full flex items-center justify-center text-white text-lg font-semibold" style="background-color: #2563EB">
+          <div v-else class="w-10 h-10 rounded-full flex items-center justify-center bg-blue-600 text-white text-lg font-semibold">
             {{ friendUsername.charAt(0).toUpperCase() }}
           </div>
           <span class="font-medium text-gray-800 dark:text-gray-200">{{ friendUsername }}</span>
@@ -540,7 +809,7 @@ watch(() => props.conversationId, (newId) => {
                 :src="getMessageAvatar(msg)!"
                 class="w-10 h-10 rounded-md object-cover flex-shrink-0"
               />
-              <div v-else class="w-10 h-10 rounded-md flex items-center justify-center text-white text-sm font-semibold flex-shrink-0" style="background-color: #2563EB">
+              <div v-else class="w-10 h-10 rounded-md flex items-center justify-center bg-blue-600 text-white text-sm font-semibold flex-shrink-0">
                 {{ msg.sender_name?.charAt(0).toUpperCase() }}
               </div>
 
@@ -580,6 +849,42 @@ watch(() => props.conversationId, (newId) => {
                     @click="previewImage(msg.content)"
                     @error="() => console.error('Image load error:', msg.content)"
                   />
+                  <!-- Voice Message -->
+                  <div
+                    v-else-if="msg.message_type === 'voice'"
+                    @click="playVoice(msg.id, msg.content, msg.voice_duration || 0)"
+                    :class="[
+                      'relative flex items-center gap-2 px-3 py-2 cursor-pointer min-w-[120px]',
+                      isOwnMessage(msg) ? 'text-white' : 'text-gray-800 dark:text-gray-200'
+                    ]"
+                  >
+                    <!-- 进度条背景 -->
+                    <div
+                      v-if="voiceProgress[msg.id] > 0"
+                      class="absolute inset-0 bg-white/20 dark:bg-black/20 transition-all duration-100"
+                      :style="{ width: `${voiceProgress[msg.id]}%` }"
+                    ></div>
+
+                    <component
+                      :is="playingVoiceId === msg.id ? Pause : Play"
+                      :class="['w-5 h-5 relative z-10', isOwnMessage(msg) ? 'text-white' : 'text-blue-500']"
+                    />
+                    <div class="flex-1 flex items-center gap-1 relative z-10">
+                      <div class="flex gap-0.5">
+                        <div
+                          v-for="i in 3"
+                          :key="i"
+                          :class="[
+                            'w-0.5 rounded-full transition-all',
+                            playingVoiceId === msg.id ? 'animate-pulse' : '',
+                            isOwnMessage(msg) ? 'bg-white' : 'bg-blue-500'
+                          ]"
+                          :style="{ height: `${8 + i * 2}px` }"
+                        ></div>
+                      </div>
+                      <span class="text-xs ml-1">{{ msg.voice_duration || 0 }}"</span>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -588,9 +893,74 @@ watch(() => props.conversationId, (newId) => {
       </div>
 
       <!-- Input Area -->
-      <div class="border-t border-gray-200 dark:border-gray-700 p-3 bg-[#F7F7F7] dark:bg-gray-800">
+      <div class="relative border-t border-gray-200 dark:border-gray-700 p-3 bg-[#F7F7F7] dark:bg-gray-800">
+        <!-- Recording Overlay (只在聊天窗口内) -->
+        <div
+          v-if="showRecordingOverlay"
+          class="absolute inset-0 z-50 bg-white/95 dark:bg-gray-800/95 backdrop-blur-sm flex flex-col items-center justify-center"
+        >
+          <div class="flex flex-col items-center gap-4 -mt-48">
+            <!-- 麦克风图标 with 环形进度条 -->
+            <div class="relative">
+              <!-- 环形进度条 (只在录音时显示) -->
+              <svg
+                v-if="isRecording"
+                class="absolute inset-0 w-full h-full -rotate-90"
+                viewBox="0 0 88 88"
+              >
+                <circle
+                  cx="44"
+                  cy="44"
+                  r="40"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="3"
+                  :stroke-dasharray="251.2"
+                  :stroke-dashoffset="251.2 - (251.2 * recordingTime / 60)"
+                  class="text-blue-500 transition-all duration-1000"
+                  stroke-linecap="round"
+                />
+              </svg>
+
+              <div
+                @mousedown.prevent="onPressStart"
+                @touchstart.prevent="onPressStart"
+                :class="[
+                  'w-20 h-20 rounded-full flex items-center justify-center transition-all duration-200 cursor-pointer',
+                  isRecording ? (recordingStatus === 'send' ? 'bg-blue-500 scale-110' : recordingStatus === 'cancel' ? 'bg-red-500 scale-110' : 'bg-gray-700') : 'bg-gray-700'
+                ]"
+              >
+                <!-- 未录音时显示麦克风图标 -->
+                <Mic v-if="!isRecording" class="w-10 h-10 text-white" />
+                <!-- 录音时显示时间 -->
+                <span v-else class="text-2xl font-bold text-white">{{ formatRecordingTime(recordingTime) }}</span>
+              </div>
+
+              <!-- 按钮下方提示 -->
+              <div class="absolute -bottom-10 left-1/2 -translate-x-1/2 text-center whitespace-nowrap">
+                <!-- 未录音时显示"长按录音" -->
+                <p v-if="!isRecording" class="text-xs text-gray-400 dark:text-gray-500">
+                  长按录音
+                </p>
+                <!-- 录音时显示状态和操作提示 -->
+                <template v-else>
+                  <p :class="[
+                    'text-sm font-medium mb-1',
+                    recordingStatus === 'send' ? 'text-blue-500' : recordingStatus === 'cancel' ? 'text-red-500' : 'text-gray-700 dark:text-gray-200'
+                  ]">
+                    {{ recordingStatus === 'send' ? '松开发送' : recordingStatus === 'cancel' ? '松开取消' : '正在录音' }}
+                  </p>
+                  <p v-if="recordingStatus === 'recording'" class="text-gray-400 dark:text-gray-500 text-xs">
+                    上滑发送 · 下滑取消
+                  </p>
+                </template>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <!-- Emoji Picker -->
-        <div v-if="showEmojiPicker" class="mb-2 p-2 bg-white dark:bg-gray-900 rounded-lg max-h-32 overflow-y-auto border border-gray-200 dark:border-gray-700">
+        <div v-if="showEmojiPicker && !showRecordingOverlay" class="mb-2 p-2 bg-white dark:bg-gray-900 rounded-lg max-h-32 overflow-y-auto border border-gray-200 dark:border-gray-700">
           <div class="grid grid-cols-8 gap-1">
             <button
               v-for="emoji in emojiList"
@@ -604,7 +974,7 @@ watch(() => props.conversationId, (newId) => {
         </div>
 
         <!-- Input Row -->
-        <div class="flex items-center gap-2">
+        <div v-if="!showRecordingOverlay" class="flex items-center gap-2">
           <!-- Emoji Button -->
           <button
             @click="showEmojiPicker = !showEmojiPicker"
@@ -614,6 +984,15 @@ watch(() => props.conversationId, (newId) => {
             ]"
           >
             <Smile class="w-5 h-5" />
+          </button>
+
+          <!-- Voice Button - 点击打开录音界面 -->
+          <button
+            @click="openRecordingOverlay"
+            class="p-2 rounded-full transition-colors hover:bg-gray-200 dark:hover:bg-gray-700"
+            title="点击录音"
+          >
+            <Mic class="w-5 h-5 text-gray-500" />
           </button>
 
           <!-- Image Upload Button -->

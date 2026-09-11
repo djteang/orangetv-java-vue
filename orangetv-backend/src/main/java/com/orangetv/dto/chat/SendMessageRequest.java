@@ -13,4 +13,6 @@ public class SendMessageRequest {
     private String content;
 
     private String messageType = "text";
+
+    private Integer voiceDuration;
 }

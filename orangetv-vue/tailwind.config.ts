@@ -1,5 +1,14 @@
 import type { Config } from 'tailwindcss'
 import defaultTheme from 'tailwindcss/defaultTheme'
+import colors from 'tailwindcss/colors'
+
+// 为已有的蓝色强调色和灰色中性色提供主题变量，默认值保留原有配色。
+function themePalette(name: string, palette: Record<string, string>) {
+  return Object.fromEntries(Object.entries(palette).map(([shade, hex]) => {
+    const rgb = [1, 3, 5].map(offset => parseInt(hex.slice(offset, offset + 2), 16)).join(' ')
+    return [shade, `rgb(var(--color-${name}-${shade}, ${rgb}) / <alpha-value>)`]
+  }))
+}
 
 const config: Config = {
   darkMode: 'class',
@@ -18,6 +27,8 @@ const config: Config = {
         primary: ['Inter', ...defaultTheme.fontFamily.sans],
       },
       colors: {
+        blue: themePalette('brand', colors.blue),
+        gray: themePalette('neutral', colors.gray),
         primary: {
           50: 'rgb(var(--color-primary-50) / <alpha-value>)',
           100: 'rgb(var(--color-primary-100) / <alpha-value>)',

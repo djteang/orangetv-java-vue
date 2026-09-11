@@ -32,6 +32,9 @@ public class StatsService {
         long todayNewUsers = userRepository.countByCreatedAtAfter(todayStart);
         stats.put("todayNewUsers", todayNewUsers);
 
+        // 与管理面板的「近 7 日登录」口径保持一致。
+        stats.put("activeUsers", userRepository.countByLastLoginAtGreaterThanEqual(todayStart.minusDays(6)));
+
         // 总搜索次数
         long totalSearches = searchHistoryRepository.count();
         stats.put("totalSearches", totalSearches);

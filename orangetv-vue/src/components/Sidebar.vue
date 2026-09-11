@@ -9,6 +9,7 @@ import {
   Tv,
   Cat,
   Clover,
+  Sparkles,
   Menu,
   ExternalLink,
 } from 'lucide-vue-next'
@@ -47,6 +48,7 @@ function handleSearchClick() {
 }
 
 const menuItems = [
+  { icon: Sparkles, label: '推荐', href: '/recommend' },
   { icon: Film, label: '电影', href: '/douban?type=movie' },
   // { icon: PlayCircle, label: '短剧', href: '/shortdrama' },
   { icon: Tv, label: '剧集', href: '/douban?type=tv' },
@@ -67,6 +69,10 @@ function isActive(href: string): boolean {
   }
 
   if (href === '/shortdrama' && decodedActive.startsWith('/shortdrama')) {
+    return true
+  }
+
+  if (href === '/recommend' && decodedActive.startsWith('/recommend')) {
     return true
   }
 

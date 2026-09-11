@@ -1,6 +1,8 @@
 import request from './index'
 import axios from 'axios'
-import type { AdminConfig, User, VideoSource, LiveSource } from '@/types'
+import type { AdminStats, AdminHistoryPage, AdminSearchHistoryEntry, AdminPlayHistoryEntry } from '@/types/admin'
+import type { AdminConfig, User, VideoSource, LiveSource, SiteSettings } from '@/types'
+import { normalizeAnnouncements } from '@/utils/announcements'
 
 // ─── 管理配置 ─────────────────────────────────────────────────────────────
 
@@ -10,27 +12,42 @@ export function getAdminConfig(): Promise<AdminConfig> {
 
 // ─── 统计数据 ─────────────────────────────────────────────────────────────
 
-export function getStats(): Promise<{
-  totalUsers: number
-  todayNewUsers: number
-  totalSearches: number
-  todaySearches: number
-  userTrend: { date: string; count: number }[]
-  searchTrend: { date: string; count: number }[]
-}> {
+export function getStats(): Promise<AdminStats> {
   return request.get('/admin/stats')
 }
 
 // ─── 站点配置 ─────────────────────────────────────────────────────────────
 
-export function updateSiteConfig(config: Record<string, unknown>): Promise<void> {
-  return request.post('/admin/site', config)
+export function updateSiteConfig(config: SiteSettings): Promise<void> {
+  const announcements = normalizeAnnouncements(config.Announcements)
+  // 通用配置接口支持 JSON 列表，保持公告顺序，并保留第一条供旧客户端读取。
+  return request.post('/admin/config', {
+    site_name: config.SiteName,
+    announcement: announcements[0]?.content || '',
+    announcements,
+    require_device_code: config.RequireDeviceCode,
+    disable_yellow_filter: config.DisableYellowFilter,
+    fluid_search: config.FluidSearch,
+    enable_linuxdo_login: config.EnableLinuxDoLogin,
+    enable_danmu: config.EnableDanmu,
+    danmu_api_url: config.DanmuApiUrl,
+    search_downstream_max_page: config.SearchDownstreamMaxPage,
+    site_interface_cache_time: config.SiteInterfaceCacheTime,
+  })
 }
 
 // ─── 用户管理 ──────────────────────────────────────────────────────────────
 
 export function getUsers(): Promise<User[]> {
   return request.get('/admin/user')
+}
+
+export function getUserSearchHistory(username: string, page = 0, size = 20, signal?: AbortSignal): Promise<AdminHistoryPage<AdminSearchHistoryEntry>> {
+  return request.get('/admin/user/search-history', { params: { username, page, size }, signal })
+}
+
+export function getUserPlayHistory(username: string, page = 0, size = 20, signal?: AbortSignal): Promise<AdminHistoryPage<AdminPlayHistoryEntry>> {
+  return request.get('/admin/user/play-history', { params: { username, page, size }, signal })
 }
 
 export function addUser(username: string, password: string, userGroup?: string): Promise<void> {

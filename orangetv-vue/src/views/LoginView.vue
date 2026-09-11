@@ -6,6 +6,7 @@ import { useSiteStore } from '@/stores/site'
 import { useToast } from '@/composables/useToast'
 import { CheckCircle, Shield } from 'lucide-vue-next'
 import ThemeToggle from '@/components/ThemeToggle.vue'
+import ChineseRedControls from '@/components/ChineseRedControls.vue'
 import MachineCode from '@/utils/machine-code'
 
 const router = useRouter()
@@ -171,15 +172,16 @@ function openGithub() {
 </script>
 
 <template>
-  <div class="relative min-h-screen flex items-center justify-center px-4 overflow-hidden bg-gray-50 dark:bg-gray-900">
+  <div class="scene-page-surface scene-auth-page relative min-h-screen flex items-center justify-center px-4 overflow-hidden bg-gray-50 dark:bg-gray-900">
     <!-- 主题切换按钮 -->
-    <div class="absolute top-4 right-4">
+    <div class="scene-auth-tools">
       <ThemeToggle />
+      <ChineseRedControls />
     </div>
 
     <!-- 登录卡片 -->
     <div
-      class="relative z-10 w-full max-w-md rounded-3xl bg-gradient-to-b from-white/90 via-white/70 to-white/40 dark:from-zinc-900/90 dark:via-zinc-900/70 dark:to-zinc-900/40 backdrop-blur-xl shadow-2xl p-10 dark:border dark:border-zinc-800"
+      class="scene-auth-card relative z-10 w-full max-w-md rounded-3xl bg-gradient-to-b from-white/90 via-white/70 to-white/40 dark:from-zinc-900/90 dark:via-zinc-900/70 dark:to-zinc-900/40 backdrop-blur-xl shadow-2xl p-10 dark:border dark:border-zinc-800"
     >
       <!-- 标题 -->
       <h1

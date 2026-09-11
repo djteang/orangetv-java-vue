@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { AlertTriangle } from 'lucide-vue-next'
+import ChineseRedControls from '@/components/ChineseRedControls.vue'
 </script>
 
 <template>
-  <div class="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900 px-4">
+  <div class="scene-page-surface scene-standalone-page min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900 px-4">
+    <div class="scene-standalone-controls"><ChineseRedControls /></div>
     <div class="text-center">
       <AlertTriangle class="w-16 h-16 mx-auto text-yellow-500 mb-4" />
       <h1 class="text-2xl font-bold text-gray-800 dark:text-white mb-2">警告</h1>

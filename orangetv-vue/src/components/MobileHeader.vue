@@ -3,6 +3,8 @@ import { useSiteStore } from '@/stores/site'
 import { useAuthStore } from '@/stores/auth'
 import BackButton from './BackButton.vue'
 import ThemeToggle from './ThemeToggle.vue'
+import ChineseRedControls from './ChineseRedControls.vue'
+import { useThemeStore } from '@/stores/theme'
 import ChatBubble from './ChatBubble.vue'
 import UserMenu from './UserMenu.vue'
 
@@ -16,6 +18,7 @@ withDefaults(defineProps<Props>(), {
 
 const siteStore = useSiteStore()
 const authStore = useAuthStore()
+const themeStore = useThemeStore()
 </script>
 
 <template>
@@ -42,5 +45,12 @@ const authStore = useAuthStore()
         <UserMenu />
       </div>
     </div>
+    <div v-if="themeStore.mode === 'chinese-red'" class="mobile-scene-controls">
+      <ChineseRedControls />
+    </div>
   </header>
 </template>
+
+<style scoped>
+.mobile-scene-controls { display: flex; justify-content: flex-end; height: var(--china-mobile-controls-row); padding: 4px 12px 8px; }
+</style>

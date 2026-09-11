@@ -116,6 +116,7 @@ public class ChatService {
                 .sender(sender)
                 .content(request.getContent())
                 .messageType(request.getMessageType())
+                .voiceDuration(request.getVoiceDuration())
                 .build();
         messageRepository.save(message);
 
@@ -332,6 +333,7 @@ public class ChatService {
                 .senderName(message.getSender().getUsername())
                 .content(message.getContent())
                 .messageType(message.getMessageType())
+                .voiceDuration(message.getVoiceDuration())
                 .timestamp(message.getCreatedAt() != null ?
                         message.getCreatedAt().toEpochSecond(CHINA_ZONE) * 1000 : null)
                 .isRead(false)

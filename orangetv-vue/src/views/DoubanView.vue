@@ -4,6 +4,7 @@ import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
 import PageLayout from '@/components/PageLayout.vue'
 import VideoCard from '@/components/VideoCard.vue'
+import DiscoveryState from '@/components/DiscoveryState.vue'
 import DoubanSelector from '@/components/DoubanSelector.vue'
 import { getDoubanCategories, getDoubanRecommends } from '@/api/douban'
 import { getBangumiCalendarData } from '@/api/bangumi'
@@ -13,6 +14,8 @@ const route = useRoute()
 
 const items = ref<DoubanItem[]>([])
 const loading = ref(true)
+const loadError = ref(false)
+let initialRequestId = 0
 const isLoadingMore = ref(false)
 const currentPage = ref(0)
 const hasMore = ref(true)
@@ -86,6 +89,7 @@ function getRequestParams(pageStart: number) {
 
 // 加载初始数据（与 page.tsx loadInitialData 一致）
 async function loadInitialData() {
+  const requestId = ++initialRequestId
   // 快照，用于防止过期数据覆盖
   const snap = {
     type: type.value,
@@ -98,6 +102,7 @@ async function loadInitialData() {
 
   try {
     loading.value = true
+    loadError.value = false
     items.value = []
     currentPage.value = 0
     hasMore.value = true
@@ -117,7 +122,7 @@ async function loadInitialData() {
           year: item.air_date?.split('-')?.[0] || '',
         }))
       } else {
-        throw new Error('没有找到对应的日期')
+        list = []
       }
     } else if (type.value === 'anime') {
       const data = await getDoubanRecommends({
@@ -166,7 +171,7 @@ async function loadInitialData() {
     }
     const isMatch = JSON.stringify(snap) === JSON.stringify(current)
 
-    if (isMatch) {
+    if (isMatch && requestId === initialRequestId) {
       items.value = list
       hasMore.value = list.length !== 0
       loading.value = false
@@ -175,7 +180,11 @@ async function loadInitialData() {
     }
   } catch (err) {
     console.error(err)
-    loading.value = false
+    if (requestId === initialRequestId) {
+      loadError.value = true
+      hasMore.value = false
+      loading.value = false
+    }
   }
 }
 
@@ -275,6 +284,8 @@ function setupObserver() {
 
 // 防抖触发加载
 function triggerLoad() {
+  initialRequestId++
+  loadError.value = false
   if (!selectorsReady.value) return
   if (debounceTimer) clearTimeout(debounceTimer)
   debounceTimer = setTimeout(() => {
@@ -355,6 +366,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  initialRequestId++
   if (observer) observer.disconnect()
   if (debounceTimer) clearTimeout(debounceTimer)
   if (selectorsTimer) clearTimeout(selectorsTimer)
@@ -430,9 +442,7 @@ onUnmounted(() => {
           已加载全部内容
         </div>
 
-        <div v-if="!loading && items.length === 0" class="text-center text-gray-500 dark:text-gray-400 py-8">
-          暂无相关内容
-        </div>
+        <DiscoveryState v-if="!loading && selectorsReady && items.length === 0" :variant="type as 'movie' | 'tv' | 'anime' | 'show'" :mode="loadError ? 'error' : 'empty'" :title="loadError ? pageTitle + '暂时加载失败' : '暂无相关' + pageTitle + '内容'" :description="loadError ? '片库信号暂时偏离航线，重新连接试试吧。' : '这个分类暂时没有内容，换一个分类、筛选条件或日期，继续发现好故事。'" action-label="重新加载" @action="loadInitialData().then(setupObserver)" />
       </div>
     </div>
   </PageLayout>

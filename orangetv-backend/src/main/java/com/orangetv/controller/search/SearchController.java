@@ -1,9 +1,15 @@
 package com.orangetv.controller.search;
 
 import com.orangetv.service.SearchService;
+import com.orangetv.service.SearchStreamService;
+import com.orangetv.exception.ApiException;
+import com.orangetv.config.SkipWrapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.CacheControl;
+import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.List;
 import java.util.Map;
@@ -14,6 +20,16 @@ import java.util.Map;
 public class SearchController {
 
     private final SearchService searchService;
+    private final SearchStreamService searchStreamService;
+
+    @GetMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    @SkipWrapper
+    public ResponseEntity<SseEmitter> searchStream(@RequestParam String q) {
+        if (q.isBlank() || q.length() > 200) throw ApiException.badRequest("请输入有效的搜索关键词");
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore())
+                .header("X-Accel-Buffering", "no")
+                .body(searchStreamService.search(q.trim()));
+    }
 
     @GetMapping
     public ResponseEntity<Map<String, Object>> search(@RequestParam String q) {

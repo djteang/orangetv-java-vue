@@ -34,39 +34,86 @@
 }
 
 :root {
-  --foreground-rgb: 255, 255, 255;
+  --foreground-rgb: var(--color-theme-text);
 
-  --color-primary-50: 240, 249, 255;
-  --color-primary-100: 224, 242, 254;
-  --color-primary-200: 186, 230, 253;
-  --color-primary-300: 125, 211, 252;
-  --color-primary-400: 56, 189, 248;
-  --color-primary-500: 14, 165, 233;
-  --color-primary-600: 2, 132, 199;
-  --color-primary-700: 3, 105, 161;
-  --color-primary-800: 7, 89, 133;
-  --color-primary-900: 12, 74, 110;
-  --color-dark: 34, 34, 34;
+  --color-primary-50: 240 249 255;
+  --color-primary-100: 224 242 254;
+  --color-primary-200: 186 230 253;
+  --color-primary-300: 125 211 252;
+  --color-primary-400: 56 189 248;
+  --color-primary-500: 14 165 233;
+  --color-primary-600: 2 132 199;
+  --color-primary-700: 3 105 161;
+  --color-primary-800: 7 89 133;
+  --color-primary-900: 12 74 110;
+  --color-dark: 34 34 34;
 
-  --color-theme-bg: 255, 255, 255;
-  --color-theme-surface: 249, 250, 251;
-  --color-theme-accent: 14, 165, 233;
-  --color-theme-text: 17, 24, 39;
-  --color-theme-text-secondary: 107, 114, 128;
-  --color-theme-border: 229, 231, 235;
-  --color-theme-success: 34, 197, 94;
-  --color-theme-warning: 245, 158, 11;
-  --color-theme-error: 239, 68, 68;
-  --color-theme-info: 59, 130, 246;
+  --color-theme-bg: 255 255 255;
+  --color-theme-surface: 249 250 251;
+  --color-theme-accent: 14 165 233;
+  --color-theme-text: 17 24 39;
+  --color-theme-text-secondary: 107 114 128;
+  --color-theme-border: 229 231 235;
+  --color-theme-success: 34 197 94;
+  --color-theme-warning: 245 158 11;
+  --color-theme-error: 239 68 68;
+  --color-theme-info: 59 130 246;
+  --china-controls-height: 54px;
+  --china-mobile-controls-row: 66px;
 }
 
 .dark {
-  --color-theme-bg: 17, 24, 39;
-  --color-theme-surface: 31, 41, 55;
-  --color-theme-accent: 56, 189, 248;
-  --color-theme-text: 243, 244, 246;
-  --color-theme-text-secondary: 156, 163, 175;
-  --color-theme-border: 55, 65, 81;
+  --color-theme-bg: 17 24 39;
+  --color-theme-surface: 31 41 55;
+  --color-theme-accent: 56 189 248;
+  --color-theme-text: 243 244 246;
+  --color-theme-text-secondary: 156 163 175;
+  --color-theme-border: 55 65 81;
+}
+
+/* 中国红：朱红强调色、暖白底色和暖棕文字。 */
+html[data-theme='chinese-red'] {
+  --color-primary-50: 255 243 234;
+  --color-primary-100: 252 225 210;
+  --color-primary-200: 249 195 173;
+  --color-primary-300: 243 144 124;
+  --color-primary-400: 231 83 72;
+  --color-primary-500: 211 47 47;
+  --color-primary-600: 190 30 45;
+  --color-primary-700: 158 22 35;
+  --color-primary-800: 127 24 34;
+  --color-primary-900: 105 26 34;
+
+  --color-brand-50: var(--color-primary-50);
+  --color-brand-100: var(--color-primary-100);
+  --color-brand-200: var(--color-primary-200);
+  --color-brand-300: var(--color-primary-300);
+  --color-brand-400: var(--color-primary-400);
+  --color-brand-500: var(--color-primary-500);
+  --color-brand-600: var(--color-primary-600);
+  --color-brand-700: var(--color-primary-700);
+  --color-brand-800: var(--color-primary-800);
+  --color-brand-900: var(--color-primary-900);
+  --color-brand-950: 61 11 18;
+
+  --color-neutral-50: 255 248 240;
+  --color-neutral-100: 250 238 224;
+  --color-neutral-200: 239 219 201;
+  --color-neutral-300: 220 193 170;
+  --color-neutral-400: 185 148 123;
+  --color-neutral-500: 137 101 83;
+  --color-neutral-600: 113 80 65;
+  --color-neutral-700: 88 59 49;
+  --color-neutral-800: 67 44 37;
+  --color-neutral-900: 49 30 26;
+  --color-neutral-950: 29 16 14;
+
+  --color-theme-bg: var(--color-neutral-50);
+  --color-theme-surface: 255 253 248;
+  --color-theme-accent: var(--color-primary-600);
+  --color-theme-text: var(--color-neutral-900);
+  --color-theme-text-secondary: var(--color-neutral-500);
+  --color-theme-border: var(--color-neutral-200);
 }
 
 * {
@@ -81,10 +128,44 @@ body {
   overflow-x: hidden;
 }
 
+/* 裁切横向溢出而不创建额外的滚动容器，让彩蛋操作栏正常吸顶。 */
+html[data-theme='chinese-red'],
+html[data-theme='chinese-red'] body {
+  overflow-x: clip;
+}
+
 body {
   color: rgb(var(--foreground-rgb));
   background: rgb(var(--color-theme-bg));
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+/* 彩蛋是页面底层插画；内容、导航和弹窗仍在各自的交互层。 */
+.app-shell { position: relative; isolation: isolate; }
+.app-content { position: relative; z-index: 1; min-height: 100vh; }
+.scene-page-surface { transition: background-color 850ms ease; }
+.scene-auth-tools { position: absolute; top: 16px; right: 16px; z-index: 20; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; width: max-content; max-width: calc(100% - 32px); pointer-events: none; }
+.scene-auth-tools > * { pointer-events: auto; }
+html[data-theme='chinese-red'] .scene-auth-tools { position: fixed; }
+.scene-standalone-controls { position: fixed; top: 16px; right: 16px; z-index: 20; width: max-content; max-width: calc(100% - 32px); }
+@media (min-width: 768px) {
+  html[data-theme='chinese-red'] .desktop-header-popover {
+    top: calc(var(--china-controls-height) + 24px);
+  }
+}
+html[data-theme='chinese-red'] .scene-standalone-page { padding-top: 6rem; padding-bottom: 6rem; }
+.app-shell[data-chinese-scene] .scene-page-surface { background-color: transparent; }
+.app-shell[data-chinese-scene] .scene-auth-card {
+  background: rgb(var(--color-theme-surface) / .91);
+  border: 1px solid rgb(var(--color-theme-border) / .75);
+  box-shadow: 0 24px 70px rgb(71 53 34 / 12%), 0 3px 14px rgb(71 53 34 / 5%);
+}
+@media (max-width: 767px), (max-height: 640px) {
+  .scene-auth-page { min-height: 100svh; padding-top: 5rem; padding-bottom: 4.5rem; }
+  html[data-theme='chinese-red'] .scene-auth-page { padding-top: 8.5rem; padding-bottom: 8.5rem; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .scene-page-surface { transition: none; }
 }
 
 a {
@@ -115,6 +196,11 @@ a {
 .art-video-player {
   width: 100%;
   height: 100%;
+}
+
+/* Artplayer 将主题变量写入行内样式；覆盖它以实时更新三种播放器的强调色。 */
+html[data-theme='chinese-red'] .art-video-player {
+  --art-theme: rgb(var(--color-primary-500)) !important;
 }
 
 /* 侧边栏偏移 */
@@ -167,4 +253,11 @@ html.dark::view-transition-new(root) {
 /* 从深色到浅色：新内容（浅色）从底部滑入 */
 html:not(.dark)::view-transition-new(root) {
   animation-name: slide-from-bottom;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation: none;
+  }
 }

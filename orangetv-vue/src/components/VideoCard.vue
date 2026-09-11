@@ -234,7 +234,7 @@ const posterUrl = computed(() => {
         class="block text-xs text-gray-500 dark:text-gray-400 mt-1"
       >
         <span
-          class="inline-block border rounded px-2 py-0.5 border-green-500/60 text-green-600 dark:border-green-400/60 dark:text-green-400 transition-all duration-300 ease-in-out group-hover:border-green-500 group-hover:text-green-600 dark:group-hover:text-green-400"
+          class="inline-block border rounded px-2 py-0.5 border-theme-accent/60 text-theme-accent transition-all duration-300 ease-in-out group-hover:border-theme-accent"
         >
           {{ sourceCount }} 个来源
         </span>
@@ -245,7 +245,7 @@ const posterUrl = computed(() => {
         class="block text-xs text-gray-500 dark:text-gray-400 mt-1"
       >
         <span
-          class="inline-block border rounded px-2 py-0.5 border-gray-500/60 dark:border-gray-400/60 transition-all duration-300 ease-in-out group-hover:border-blue-500/60 group-hover:text-blue-600 dark:group-hover:text-blue-400"
+          class="inline-block border rounded px-2 py-0.5 border-theme-accent/60 text-theme-accent transition-all duration-300 ease-in-out group-hover:border-theme-accent"
         >
           {{ sourceName }}
         </span>

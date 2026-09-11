@@ -42,41 +42,54 @@ public class AppConfig {
     }
 
     @Bean
+    @Primary
     public RestTemplate restTemplate() throws Exception {
+        return createRestTemplate(false);
+    }
+
+    @Bean(name = "searchRestTemplate")
+    public RestTemplate searchRestTemplate() throws Exception {
+        return createRestTemplate(true);
+    }
+
+    private RestTemplate createRestTemplate(boolean searchClient) throws Exception {
         // 构建信任所有证书的 SSL 上下文（CMS 视频源 API 常使用自签名/过期证书）
         SSLContext sslContext = SSLContextBuilder.create()
                 .loadTrustMaterial(TrustAllStrategy.INSTANCE)
                 .build();
 
-        // 连接配置：连接超时 30s，Socket 读取超时 60s（直播流需要更长超时）
+        // 搜索使用较短超时；直播等请求保留原有的 30s / 60s 超时。
         ConnectionConfig connectionConfig = ConnectionConfig.custom()
-                .setConnectTimeout(Timeout.ofSeconds(30))
-                .setSocketTimeout(Timeout.ofSeconds(60))
+                .setConnectTimeout(Timeout.ofSeconds(searchClient ? 3 : 30))
+                .setSocketTimeout(Timeout.ofSeconds(searchClient ? 8 : 60))
                 .build();
 
-        // 连接池管理器：最大连接 200，每个路由最大 50
+        // 搜索独立使用连接池，避免慢源影响直播和其他代理请求。
         HttpClientConnectionManager connectionManager = PoolingHttpClientConnectionManagerBuilder.create()
                 .setSSLSocketFactory(SSLConnectionSocketFactoryBuilder.create()
                         .setSslContext(sslContext)
                         .setHostnameVerifier(NoopHostnameVerifier.INSTANCE)
                         .build())
                 .setDefaultConnectionConfig(connectionConfig)
-                .setMaxConnTotal(200)
-                .setMaxConnPerRoute(50)
+                .setMaxConnTotal(searchClient ? 48 : 200)
+                .setMaxConnPerRoute(searchClient ? 8 : 50)
                 .build();
 
-        // 请求配置：响应超时 60s，自动跟随重定向
+        // 搜索也限制等待连接的时间，防止连接池拥塞时长时间排队。
         RequestConfig requestConfig = RequestConfig.custom()
-                .setResponseTimeout(Timeout.ofSeconds(60))
+                .setResponseTimeout(Timeout.ofSeconds(searchClient ? 8 : 60))
+                .setConnectionRequestTimeout(Timeout.ofSeconds(searchClient ? 2 : 180))
                 .setRedirectsEnabled(true)
                 .build();
 
-        CloseableHttpClient httpClient = HttpClients.custom()
+        var clientBuilder = HttpClients.custom()
                 .setConnectionManager(connectionManager)
                 .setDefaultRequestConfig(requestConfig)
                 .setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
-                .disableCookieManagement()
-                .build();
+                .disableCookieManagement();
+        // 慢源只尝试一次，避免自动重试占用搜索连接池。
+        if (searchClient) clientBuilder.disableAutomaticRetries();
+        CloseableHttpClient httpClient = clientBuilder.build();
 
         HttpComponentsClientHttpRequestFactory factory = new HttpComponentsClientHttpRequestFactory(httpClient);
         RestTemplate restTemplate = new RestTemplate(factory);

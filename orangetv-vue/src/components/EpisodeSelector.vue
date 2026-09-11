@@ -1,6 +1,8 @@
 <script setup lang="ts">
-import { ref, computed, watch, nextTick, reactive } from 'vue'
+import { ref, computed, watch, nextTick, reactive, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
+import { Gauge, Loader2 } from 'lucide-vue-next'
+import { getVideoDetail } from '@/api/search'
 import type { SearchResult } from '@/types'
 
 interface VideoInfo {
@@ -8,6 +10,7 @@ interface VideoInfo {
   loadSpeed: string
   pingTime: number
   hasError?: boolean
+  errorMessage?: string
 }
 
 const props = withDefaults(
@@ -107,128 +110,157 @@ watch(displayPage, async () => {
 // ===== 测速逻辑 =====
 const videoInfoMap = reactive<Map<string, VideoInfo>>(new Map())
 const attemptedSources = reactive<Set<string>>(new Set())
+const testingSources = reactive<Set<string>>(new Set())
+const testControllers = new Map<string, AbortController>()
+let automaticTesting = false
+let disposed = false
 
-async function getVideoInfoFromM3u8(url: string): Promise<VideoInfo> {
+function getSourceKey(source: SearchResult): string {
+  return JSON.stringify([source.source, source.id])
+}
+
+async function getVideoInfoFromM3u8(url: string, signal: AbortSignal): Promise<VideoInfo> {
   const startTime = performance.now()
+  const response = await fetch(url, {
+    method: 'GET',
+    signal,
+    mode: 'cors',
+    cache: 'no-store',
+  })
+  if (!response.ok) throw new Error(`请求失败（${response.status}）`)
 
+  const pingTime = Math.round(performance.now() - startTime)
+  const contentType = response.headers.get('content-type') || ''
+  // 普通视频仅测响应，HLS 播放列表仍需读取内容。
+  if (/^(video|audio)\//i.test(contentType) && !/mpegurl/i.test(contentType)) {
+    await response.body?.cancel()
+    return { quality: '未知', loadSpeed: '', pingTime }
+  }
+
+  const text = await response.text()
+  if (!text.trimStart().startsWith('#EXTM3U')) throw new Error('未返回有效播放列表')
+
+  const downloadTime = Math.max(1, performance.now() - startTime)
+  const bytes = new TextEncoder().encode(text).byteLength
+  const speedBps = (bytes * 8) / (downloadTime / 1000)
+  let loadSpeed: string
+  if (speedBps > 1000000) {
+    loadSpeed = `${(speedBps / 1000000).toFixed(1)} Mbps`
+  } else if (speedBps > 1000) {
+    loadSpeed = `${(speedBps / 1000).toFixed(0)} Kbps`
+  } else {
+    loadSpeed = `${Math.round(speedBps)} bps`
+  }
+
+  // 解析 m3u8 获取分辨率
+  let quality = '未知'
+  const resolutionMatch = text.match(/RESOLUTION=(\d+)x(\d+)/)
+  if (resolutionMatch) {
+    const height = parseInt(resolutionMatch[2])
+    if (height >= 2160) quality = '4K'
+    else if (height >= 1440) quality = '2K'
+    else if (height >= 1080) quality = '1080p'
+    else if (height >= 720) quality = '720p'
+    else if (height >= 480) quality = '480p'
+    else quality = `${height}p`
+  } else if (text.includes('#EXTINF')) {
+    // 非 master playlist，尝试从 bandwidth 判断
+    const bandwidthMatch = text.match(/BANDWIDTH=(\d+)/)
+    if (bandwidthMatch) {
+      const bw = parseInt(bandwidthMatch[1])
+      if (bw > 8000000) quality = '4K'
+      else if (bw > 4000000) quality = '1080p'
+      else if (bw > 2000000) quality = '720p'
+      else quality = '480p'
+    } else {
+      quality = 'SD'
+    }
+  }
+
+  return { quality, loadSpeed, pingTime }
+}
+
+async function testSource(source: SearchResult, force = false) {
+  const sourceKey = getSourceKey(source)
+  if (disposed || testingSources.has(sourceKey)) return
+  if (!force && attemptedSources.has(sourceKey)) return
+
+  attemptedSources.add(sourceKey)
+  testingSources.add(sourceKey)
+  videoInfoMap.delete(sourceKey)
   const controller = new AbortController()
+  testControllers.set(sourceKey, controller)
+  const startTime = performance.now()
   const timeoutId = setTimeout(() => controller.abort(), 8000)
 
   try {
-    const response = await fetch(url, {
-      method: 'GET',
-      signal: controller.signal,
-      mode: 'cors',
-    })
-    clearTimeout(timeoutId)
+    const episodes = source.episodes?.some(Boolean)
+      ? source.episodes
+      : (await getVideoDetail(source.source, source.id, controller.signal))?.episodes
+    const episodeIndex = Math.max(0, props.modelValue - 1)
+    const episodeUrl = episodes?.[episodeIndex] || episodes?.find(Boolean)
+    if (!episodeUrl) throw new Error('暂无播放地址')
 
-    const pingTime = Math.round(performance.now() - startTime)
-    // const contentLength = response.headers.get('content-length')
-    const text = await response.text()
-
-    const downloadTime = performance.now() - startTime
-    const bytes = text.length
-    const speedBps = (bytes * 8) / (downloadTime / 1000)
-    let loadSpeed: string
-    if (speedBps > 1000000) {
-      loadSpeed = `${(speedBps / 1000000).toFixed(1)} Mbps`
-    } else if (speedBps > 1000) {
-      loadSpeed = `${(speedBps / 1000).toFixed(0)} Kbps`
-    } else {
-      loadSpeed = `${Math.round(speedBps)} bps`
-    }
-
-    // 解析 m3u8 获取分辨率
-    let quality = '未知'
-    const resolutionMatch = text.match(/RESOLUTION=(\d+)x(\d+)/)
-    if (resolutionMatch) {
-      const height = parseInt(resolutionMatch[2])
-      if (height >= 2160) quality = '4K'
-      else if (height >= 1440) quality = '2K'
-      else if (height >= 1080) quality = '1080p'
-      else if (height >= 720) quality = '720p'
-      else if (height >= 480) quality = '480p'
-      else quality = `${height}p`
-    } else if (text.includes('#EXTINF')) {
-      // 非 master playlist，尝试从 bandwidth 判断
-      const bandwidthMatch = text.match(/BANDWIDTH=(\d+)/)
-      if (bandwidthMatch) {
-        const bw = parseInt(bandwidthMatch[1])
-        if (bw > 8000000) quality = '4K'
-        else if (bw > 4000000) quality = '1080p'
-        else if (bw > 2000000) quality = '720p'
-        else quality = '480p'
-      } else {
-        // 估算：如果 content-length 大，说明分辨率可能较高
-        quality = 'SD'
-      }
-    }
-
-    return { quality, loadSpeed, pingTime }
-  } catch (err) {
-    clearTimeout(timeoutId)
-    const pingTime = Math.round(performance.now() - startTime)
-
-    const errMsg = err instanceof Error ? err.message : String(err)
-    const isRestricted =
-      errMsg.includes('CORS') ||
-      errMsg.includes('Forbidden') ||
-      errMsg.includes('NetworkError') ||
-      errMsg.includes('Failed to fetch') ||
-      errMsg.includes('abort')
-
-    return {
-      quality: isRestricted ? '受限' : '未知',
-      loadSpeed: '未知',
-      pingTime,
-      hasError: true,
-    }
-  }
-}
-
-async function testSource(source: SearchResult) {
-  const sourceKey = `${source.source}-${source.id}`
-  if (attemptedSources.has(sourceKey)) return
-  if (!source.episodes || source.episodes.length === 0) return
-
-  attemptedSources.add(sourceKey)
-
-  const episodeUrl = source.episodes.length > 1 ? source.episodes[1] : source.episodes[0]
-  try {
-    const info = await getVideoInfoFromM3u8(episodeUrl)
-    videoInfoMap.set(sourceKey, info)
-  } catch {
+    const info = await getVideoInfoFromM3u8(episodeUrl, controller.signal)
+    if (testControllers.get(sourceKey) === controller) videoInfoMap.set(sourceKey, info)
+  } catch (error) {
+    if (testControllers.get(sourceKey) !== controller) return
     videoInfoMap.set(sourceKey, {
       quality: '未知',
       loadSpeed: '未知',
-      pingTime: 0,
+      pingTime: Math.round(performance.now() - startTime),
       hasError: true,
+      errorMessage: controller.signal.aborted
+        ? '测速超时，请重试'
+        : error instanceof TypeError
+          ? '连接失败或不支持测速'
+          : error instanceof Error ? error.message : '测速失败，请重试',
     })
+  } finally {
+    clearTimeout(timeoutId)
+    if (testControllers.get(sourceKey) === controller) {
+      testControllers.delete(sourceKey)
+      testingSources.delete(sourceKey)
+    }
   }
 }
 
-// 当切换到换源 tab 且有源数据时，批量测速
-watch(
-  [activeTab, () => props.availableSources],
-  async () => {
-    if (activeTab.value !== 'sources' || props.availableSources.length === 0) return
-
-    const pending = props.availableSources.filter((s) => {
-      const key = `${s.source}-${s.id}`
-      return !attemptedSources.has(key)
-    })
-
-    if (pending.length === 0) return
-
-    // 分批并发测速（每批3个）
-    const batchSize = 3
-    for (let i = 0; i < pending.length; i += batchSize) {
-      const batch = pending.slice(i, i + batchSize)
-      await Promise.all(batch.map(testSource))
+async function testPendingSources() {
+  if (automaticTesting) return
+  automaticTesting = true
+  try {
+    while (!disposed && activeTab.value === 'sources') {
+      // 自动检测保持每批三个；手动检测可优先选择尚未轮到的来源。
+      const pending = props.availableSources
+        .filter(source => source.episodes?.some(Boolean) && !attemptedSources.has(getSourceKey(source)))
+        .slice(0, 3)
+      if (pending.length === 0) break
+      await Promise.all(pending.map(source => testSource(source)))
     }
-  },
-  { immediate: true }
+  } finally {
+    automaticTesting = false
+  }
+}
+
+function resetSpeedTests() {
+  for (const controller of testControllers.values()) controller.abort()
+  testControllers.clear()
+  testingSources.clear()
+  attemptedSources.clear()
+  videoInfoMap.clear()
+}
+
+watch(() => props.videoTitle, resetSpeedTests)
+watch(
+  [activeTab, () => props.availableSources, () => props.videoTitle],
+  () => { void testPendingSources() },
+  { immediate: true },
 )
+
+onUnmounted(() => {
+  disposed = true
+  resetSpeedTests()
+})
 
 function getQualityColor(quality: string): string {
   if (['4K', '2K'].includes(quality))
@@ -367,7 +399,7 @@ function goToSearch() {
 
     <!-- Sources tab -->
     <template v-if="activeTab === 'sources'">
-      <div class="flex flex-col h-full mt-4">
+      <div class="flex flex-col flex-1 min-h-0 mt-4">
         <div v-if="sourceSearchLoading" class="flex items-center justify-center py-8">
           <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
           <span class="ml-2 text-sm text-gray-600 dark:text-gray-300">搜索中...</span>
@@ -391,7 +423,7 @@ function goToSearch() {
         </div>
 
         <template v-else>
-          <div class="flex-1 overflow-y-auto space-y-2 pb-20">
+          <div class="source-list flex-1 min-h-0 overflow-y-auto space-y-2 pb-4">
             <div
               v-for="source in [...availableSources].sort((a, b) => {
                 const aIsCurrent =
@@ -404,7 +436,7 @@ function goToSearch() {
                 if (!aIsCurrent && bIsCurrent) return 1
                 return 0
               })"
-              :key="`${source.source}-${source.id}`"
+              :key="getSourceKey(source)"
               @click="
                 !(
                   source.source?.toString() === currentSource?.toString() &&
@@ -412,7 +444,7 @@ function goToSearch() {
                 ) && handleSourceClick(source)
               "
               :class="[
-                'flex items-start gap-3 px-2 py-3 rounded-lg transition-all select-none duration-200 relative',
+                'source-option flex items-start gap-3 px-2 py-3 rounded-lg transition-all select-none duration-200 relative',
                 source.source?.toString() === currentSource?.toString() &&
                 source.id?.toString() === currentId?.toString()
                   ? 'bg-blue-500/10 dark:bg-blue-500/20 border-blue-500/30 border'
@@ -421,7 +453,7 @@ function goToSearch() {
             >
               <!-- Poster -->
               <div
-                class="flex-shrink-0 w-12 h-20 bg-gray-300 dark:bg-gray-600 rounded overflow-hidden"
+                class="source-poster flex-shrink-0 w-12 h-20 bg-gray-300 dark:bg-gray-600 rounded overflow-hidden"
               >
                 <img
                   v-if="source.poster"
@@ -433,35 +465,35 @@ function goToSearch() {
               </div>
 
               <!-- Info -->
-              <div class="flex-1 min-w-0 flex flex-col justify-between h-20">
+              <div class="flex-1 min-w-0 flex flex-col gap-1">
                 <!-- 标题 + 分辨率 -->
-                <div class="flex items-start justify-between gap-3 h-6">
+                <div class="source-heading flex items-start justify-between gap-3 h-6">
                   <h3
                     class="font-medium text-base truncate text-gray-900 dark:text-gray-100 leading-none"
                   >
                     {{ source.title }}
                   </h3>
                   <!-- 分辨率标签 -->
-                  <template v-if="videoInfoMap.get(`${source.source}-${source.id}`)">
+                  <template v-if="videoInfoMap.get(getSourceKey(source))">
                     <div
-                      v-if="videoInfoMap.get(`${source.source}-${source.id}`)!.hasError"
+                      v-if="videoInfoMap.get(getSourceKey(source))!.hasError"
                       class="bg-gray-500/10 dark:bg-gray-400/20 text-red-600 dark:text-red-400 px-1.5 py-0 rounded text-xs flex-shrink-0 min-w-[50px] text-center"
                     >
                       检测失败
                     </div>
                     <div
-                      v-else-if="videoInfoMap.get(`${source.source}-${source.id}`)!.quality !== '未知'"
+                      v-else-if="videoInfoMap.get(getSourceKey(source))!.quality !== '未知'"
                       :class="[
                         'bg-gray-500/10 dark:bg-gray-400/20 px-1.5 py-0 rounded text-xs flex-shrink-0 min-w-[50px] text-center',
-                        getQualityColor(videoInfoMap.get(`${source.source}-${source.id}`)!.quality),
+                        getQualityColor(videoInfoMap.get(getSourceKey(source))!.quality),
                       ]"
                     >
-                      {{ videoInfoMap.get(`${source.source}-${source.id}`)!.quality }}
+                      {{ videoInfoMap.get(getSourceKey(source))!.quality }}
                     </div>
                   </template>
                   <!-- 测速中 -->
                   <div
-                    v-else-if="attemptedSources.has(`${source.source}-${source.id}`)"
+                    v-else-if="testingSources.has(getSourceKey(source))"
                     class="bg-gray-500/10 dark:bg-gray-400/20 text-gray-500 px-1.5 py-0 rounded text-xs flex-shrink-0 min-w-[50px] text-center"
                   >
                     检测中...
@@ -469,41 +501,70 @@ function goToSearch() {
                 </div>
 
                 <!-- 源名称 + 集数 -->
-                <div class="flex items-center justify-between">
+                <div class="flex items-center justify-between gap-2">
                   <span
-                    class="text-xs px-2 py-1 border border-gray-500/60 rounded text-gray-700 dark:text-gray-300"
+                    :title="source.source_name"
+                    class="min-w-0 truncate text-xs px-2 py-1 border border-gray-500/60 rounded text-gray-700 dark:text-gray-300"
                   >
                     {{ source.source_name }}
                   </span>
                   <span
                     v-if="source.episodes && source.episodes.length > 1"
-                    class="text-xs text-gray-500 dark:text-gray-400 font-medium"
+                    class="flex-shrink-0 text-xs text-gray-500 dark:text-gray-400 font-medium"
                   >
                     {{ source.episodes.length }} 集
                   </span>
                 </div>
 
                 <!-- 测速数据 -->
-                <div class="flex items-end h-6">
-                  <template v-if="videoInfoMap.get(`${source.source}-${source.id}`)">
-                    <div
-                      v-if="!videoInfoMap.get(`${source.source}-${source.id}`)!.hasError"
-                      class="flex items-end gap-3 text-xs"
-                    >
-                      <div class="text-blue-600 dark:text-blue-400 font-medium">
-                        {{ videoInfoMap.get(`${source.source}-${source.id}`)!.loadSpeed }}
+                <div class="source-speed-row flex items-center justify-between gap-2">
+                  <div class="source-speed-data min-w-0 flex-1" role="status" aria-atomic="true">
+                    <template v-if="videoInfoMap.get(getSourceKey(source))">
+                      <div
+                        v-if="!videoInfoMap.get(getSourceKey(source))!.hasError"
+                        class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs"
+                      >
+                        <div
+                          v-if="videoInfoMap.get(getSourceKey(source))!.loadSpeed"
+                          class="text-blue-600 dark:text-blue-400 font-medium"
+                          title="播放列表下载速度"
+                        >
+                          {{ videoInfoMap.get(getSourceKey(source))!.loadSpeed }}
+                        </div>
+                        <div class="text-orange-600 dark:text-orange-400 font-medium" title="播放地址响应时间">
+                          {{ videoInfoMap.get(getSourceKey(source))!.pingTime }}ms
+                        </div>
                       </div>
-                      <div class="text-orange-600 dark:text-orange-400 font-medium">
-                        {{ videoInfoMap.get(`${source.source}-${source.id}`)!.pingTime }}ms
+                      <div
+                        v-else
+                        class="text-red-500/90 dark:text-red-400 font-medium text-xs break-words"
+                      >
+                        {{ videoInfoMap.get(getSourceKey(source))!.errorMessage || '测速失败，请重试' }}
                       </div>
-                    </div>
-                    <div
-                      v-else
-                      class="text-red-500/90 dark:text-red-400 font-medium text-xs"
+                    </template>
+                    <span v-else class="text-xs text-gray-500 dark:text-gray-400">
+                      {{ testingSources.has(getSourceKey(source)) ? '正在检测连接…' : '尚未测速' }}
+                    </span>
+                  </div>
+                  <span class="source-speed-button flex-shrink-0" @click.stop>
+                    <button
+                      type="button"
+                      class="inline-flex items-center justify-center gap-1 min-h-11 sm:min-h-8 px-2 rounded-md border border-blue-500/30 bg-blue-500/5 text-blue-600 dark:text-blue-400 text-xs font-medium hover:bg-blue-500/15 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 disabled:cursor-wait disabled:opacity-60 transition-colors"
+                      :disabled="testingSources.has(getSourceKey(source))"
+                      :aria-busy="testingSources.has(getSourceKey(source))"
+                      :aria-label="`${testingSources.has(getSourceKey(source)) ? '正在测速' : videoInfoMap.has(getSourceKey(source)) ? '重新测速' : '测速'}：${source.source_name || source.source}`"
+                      @click.stop="testSource(source, true)"
                     >
-                      无测速数据
-                    </div>
-                  </template>
+                      <Loader2
+                        v-if="testingSources.has(getSourceKey(source))"
+                        :size="14"
+                        class="animate-spin motion-reduce:animate-none"
+                        aria-hidden="true"
+                      />
+                      <Gauge v-else :size="14" aria-hidden="true" />
+                      {{ testingSources.has(getSourceKey(source)) ? '测速中' : videoInfoMap.has(getSourceKey(source)) ? '重测' : '测速' }}
+                    </button>
+                  </span>
                 </div>
               </div>
             </div>
@@ -525,3 +586,35 @@ function goToSearch() {
     </template>
   </div>
 </template>
+
+<style scoped>
+.source-list {
+  container: source-list / inline-size;
+}
+
+/* 桌面分栏也可能很窄，按面板宽度调整卡片，避免按钮被海报挤出。 */
+@container source-list (max-width: 220px) {
+  .source-poster {
+    display: none;
+  }
+
+  .source-heading {
+    height: auto;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+
+  .source-heading h3,
+  .source-speed-data {
+    flex-basis: 100%;
+  }
+
+  .source-speed-row {
+    flex-wrap: wrap;
+  }
+
+  .source-speed-button {
+    margin-left: auto;
+  }
+}
+</style>

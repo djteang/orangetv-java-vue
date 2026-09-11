@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
+import { X } from 'lucide-vue-next'
 import { useUserStore } from '@/stores/user'
 import ScrollableRow from './ScrollableRow.vue'
 import VideoCard from './VideoCard.vue'
@@ -49,6 +50,10 @@ async function handleClearAll() {
   }
 }
 
+async function handleDeleteOne(key: string) {
+  await userStore.deletePlayRecord(key)
+}
+
 onMounted(async () => {
   try {
     await userStore.fetchPlayRecords()
@@ -90,8 +95,16 @@ onMounted(async () => {
         <div
           v-for="item in playRecordItems"
           :key="item.key"
-          class="min-w-[96px] w-24 sm:min-w-[180px] sm:w-44"
+          class="relative group/card min-w-[96px] w-24 sm:min-w-[180px] sm:w-44"
         >
+          <!-- 删除单个按钮 -->
+          <button
+            class="absolute -top-1.5 -right-1.5 z-[999] w-5 h-5 rounded-full bg-black/60 text-white flex items-center justify-center opacity-0 group-hover/card:opacity-100 transition-opacity duration-200 hover:bg-red-500"
+            title="删除此记录"
+            @click.stop="handleDeleteOne(item.key)"
+          >
+            <X class="w-3 h-3" />
+          </button>
           <VideoCard
             :id="item.id"
             :title="item.title"

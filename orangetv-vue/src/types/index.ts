@@ -225,10 +225,29 @@ export interface ConfigSubscription {
   LastCheck: string
 }
 
+export interface SiteAnnouncement {
+  id: string
+  content: string
+}
+
+export interface SiteSettings {
+  SiteName: string
+  Announcements: SiteAnnouncement[]
+  RequireDeviceCode: boolean
+  DisableYellowFilter: boolean
+  FluidSearch: boolean
+  EnableLinuxDoLogin: boolean
+  EnableDanmu: boolean
+  DanmuApiUrl: string
+  SearchDownstreamMaxPage: number
+  SiteInterfaceCacheTime: number
+}
+
 // 站点配置（后端返回的 Config 对象，key 为 snake_case）
 export interface SiteConfig {
   site_name?: string
   announcement?: string
+  announcements?: SiteAnnouncement[]
   require_device_code?: boolean
   disable_yellow_filter?: boolean
   fluid_search?: boolean

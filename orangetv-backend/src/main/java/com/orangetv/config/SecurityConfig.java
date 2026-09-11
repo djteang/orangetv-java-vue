@@ -21,6 +21,7 @@ import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.web.cors.CorsConfigurationSource;
 import jakarta.servlet.http.HttpServletResponse;
+import jakarta.servlet.DispatcherType;
 
 @Configuration
 @EnableWebSecurity
@@ -39,6 +40,9 @@ public class SecurityConfig {
                 .csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
+                        // 初始搜索请求仍需认证；仅放行其内部异步完成分派，避免响应提交后再次鉴权。
+                        .requestMatchers(request -> request.getDispatcherType() == DispatcherType.ASYNC
+                                && (request.getContextPath() + "/api/search/stream").equals(request.getRequestURI())).permitAll()
                         // 公开端点
                         .requestMatchers("/api/login", "/api/register").permitAll()
                         .requestMatchers("/api/health", "/api/server-config").permitAll()

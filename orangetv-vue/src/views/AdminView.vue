@@ -1,17 +1,24 @@
 <script setup lang="ts">
 import { ref, onMounted, watch } from 'vue'
 import PageLayout from '@/components/PageLayout.vue'
+import AdminUserList from '@/components/AdminUserList.vue'
+import AdminOverview from '@/components/AdminOverview.vue'
+import type { AdminStats } from '@/types/admin'
+import AnnouncementEditor from '@/components/AnnouncementEditor.vue'
 import { useToast } from '@/composables/useToast'
+import { useSiteStore } from '@/stores/site'
+import { normalizeAnnouncements } from '@/utils/announcements'
 import * as adminApi from '@/api/admin'
-import type { User, VideoSource, LiveSource, SiteConfig, AdminConfig, CustomCategory, ConfigSubscription } from '@/types'
+import type { User, VideoSource, LiveSource, SiteConfig, SiteSettings, AdminConfig, CustomCategory, ConfigSubscription } from '@/types'
 import {
   Users, Video, Settings, Loader2, Plus, Trash2, Shield,
-  Save, ChevronDown, ChevronUp, Pencil, Ban, UserCheck,
-  KeyRound, X, FileText, FolderOpen, Database, Download, Upload, AlertTriangle,
-  Zap, ShieldCheck
+  Save, ChevronDown, ChevronUp, Pencil,
+  X, FileText, FolderOpen, Database, Download, Upload, AlertTriangle,
+  ShieldCheck
 } from 'lucide-vue-next'
 
 const toast = useToast()
+const siteStore = useSiteStore()
 
 // ─── 全局状态 ───────────────────────────────────────────────────────────
 const loading = ref(true)
@@ -61,16 +68,14 @@ async function fetchConfig() {
 
 onMounted(async () => {
   await fetchConfig()
-  if (role.value) {
-    await fetchStats()
-  }
   loading.value = false
+  if (role.value) void fetchStats()
 })
 
 // ─── 站点配置 ───────────────────────────────────────────────────────────
-const siteSettings = ref({
+const siteSettings = ref<SiteSettings>({
   SiteName: '',
-  Announcement: '',
+  Announcements: [],
   RequireDeviceCode: true,
   DisableYellowFilter: false,
   FluidSearch: true,
@@ -86,7 +91,7 @@ watch(siteConfig, (cfg) => {
   if (cfg) {
     siteSettings.value = {
       SiteName: (cfg.site_name as string) || '',
-      Announcement: (cfg.announcement as string) || '',
+      Announcements: normalizeAnnouncements(cfg.announcements, cfg.announcement),
       RequireDeviceCode: cfg.require_device_code !== undefined ? !!cfg.require_device_code : true,
       DisableYellowFilter: !!cfg.disable_yellow_filter,
       FluidSearch: cfg.fluid_search !== undefined ? !!cfg.fluid_search : true,
@@ -100,13 +105,22 @@ watch(siteConfig, (cfg) => {
 }, { immediate: true })
 
 async function handleSaveSiteConfig() {
-  await withLoading('saveSiteConfig', async () => {
-    try {
+  if (isLoading('saveSiteConfig')) return
+  const emptyIndex = siteSettings.value.Announcements.findIndex(item => !item.content.trim())
+  if (emptyIndex !== -1) {
+    toast.error(`请填写第 ${emptyIndex + 1} 条公告内容，或删除该条公告`)
+    return
+  }
+  try {
+    await withLoading('saveSiteConfig', async () => {
       await adminApi.updateSiteConfig({ ...siteSettings.value })
-      toast.success('站点配置已保存')
-      await fetchConfig()
-    } catch { toast.error('保存失败') }
-  })
+      await Promise.all([fetchConfig(), siteStore.fetchConfig()])
+    })
+    // 配置同步和加载状态结束后再提示，避免慢请求期间提示已自动消失。
+    toast.success('站点配置保存成功')
+  } catch {
+    toast.error('站点配置保存失败，请稍后重试')
+  }
 }
 
 // ─── 用户管理 ───────────────────────────────────────────────────────────
@@ -119,8 +133,8 @@ const changePasswordUser = ref({ username: '', password: '' })
 const showDeleteUserModal = ref(false)
 const deletingUser = ref<string | null>(null)
 
-async function fetchUsers() {
-  if (usersLoaded.value) return
+async function fetchUsers(force = false) {
+  if (usersLoaded.value && !force) return
   await withLoading('fetchUsers', async () => {
     try {
       users.value = await adminApi.getUsers() as User[]
@@ -136,8 +150,7 @@ async function handleAddUser() {
       await adminApi.addUser(newUser.value.username, newUser.value.password)
       newUser.value = { username: '', password: '' }
       showAddUserForm.value = false
-      usersLoaded.value = false
-      await fetchUsers()
+      await fetchUsers(true)
       toast.success('用户已添加')
     } catch { toast.error('添加失败') }
   })
@@ -147,7 +160,7 @@ async function handleBanUser(username: string) {
   await withLoading(`ban_${username}`, async () => {
     try {
       await adminApi.banUser(username)
-      usersLoaded.value = false; await fetchUsers()
+      await fetchUsers(true)
       toast.success('用户已封禁')
     } catch { toast.error('操作失败') }
   })
@@ -157,7 +170,7 @@ async function handleUnbanUser(username: string) {
   await withLoading(`unban_${username}`, async () => {
     try {
       await adminApi.unbanUser(username)
-      usersLoaded.value = false; await fetchUsers()
+      await fetchUsers(true)
       toast.success('用户已解封')
     } catch { toast.error('操作失败') }
   })
@@ -167,7 +180,7 @@ async function handleSetAdmin(username: string) {
   await withLoading(`setAdmin_${username}`, async () => {
     try {
       await adminApi.setAdmin(username)
-      usersLoaded.value = false; await fetchUsers()
+      await fetchUsers(true)
       toast.success('已设为管理员')
     } catch { toast.error('操作失败') }
   })
@@ -177,7 +190,7 @@ async function handleCancelAdmin(username: string) {
   await withLoading(`cancelAdmin_${username}`, async () => {
     try {
       await adminApi.cancelAdmin(username)
-      usersLoaded.value = false; await fetchUsers()
+      await fetchUsers(true)
       toast.success('已取消管理员')
     } catch { toast.error('操作失败') }
   })
@@ -212,30 +225,29 @@ async function handleConfirmDeleteUser() {
       await adminApi.deleteUser(deletingUser.value!)
       showDeleteUserModal.value = false
       deletingUser.value = null
-      usersLoaded.value = false; await fetchUsers()
+      await fetchUsers(true)
       toast.success('用户已删除')
     } catch { toast.error('删除失败') }
   })
 }
 
 // ─── 统计数据 ───────────────────────────────────────────────────────────
-const stats = ref({
-  totalUsers: 0,
-  todayNewUsers: 0,
-  totalSearches: 0,
-  todaySearches: 0,
-  totalVideoSources: 0,
-  activeUsers: 0,
-  userTrend: [] as { date: string; count: number }[],
-  searchTrend: [] as { date: string; count: number }[]
-})
+const stats = ref<AdminStats | null>(null)
+const statsLoading = ref(false)
+const statsError = ref('')
+const statsUpdatedAt = ref('')
 
 async function fetchStats() {
+  if (statsLoading.value) return
+  statsLoading.value = true
+  statsError.value = ''
   try {
-    const data = await adminApi.getStats() as any
-    stats.value = data
-  } catch (err) {
-    console.error('获取统计数据失败:', err)
+    stats.value = await adminApi.getStats()
+    statsUpdatedAt.value = new Date().toLocaleTimeString('zh-CN', { hour12: false })
+  } catch {
+    statsError.value = stats.value ? '刷新失败，当前显示上次更新的数据，请重试。' : '统计数据加载失败，请点击“刷新数据”重试。'
+  } finally {
+    statsLoading.value = false
   }
 }
 
@@ -748,119 +760,7 @@ async function handleImportData() {
             <h1 class="text-2xl font-bold text-gray-900 dark:text-gray-100">管理员设置</h1>
           </div>
 
-          <!-- 统计概览 -->
-          <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-            <!-- 总用户数 -->
-            <div class="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm border border-gray-200 dark:border-gray-700 hover:shadow-md transition-shadow">
-              <div class="flex items-center justify-between mb-4">
-                <div class="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
-                  <Users class="w-6 h-6 text-blue-600 dark:text-blue-400" />
-                </div>
-                <span class="text-xs font-medium text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-900/20 px-2 py-1 rounded-full">
-                  +{{ stats.todayNewUsers || 0 }} 今日
-                </span>
-              </div>
-              <div class="space-y-1">
-                <p class="text-sm text-gray-600 dark:text-gray-400">总用户数</p>
-                <p class="text-2xl font-bold text-gray-900 dark:text-gray-100">{{ stats.totalUsers || 0 }}</p>
-              </div>
-            </div>
-
-            <!-- 活跃用户 -->
-            <div class="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm border border-gray-200 dark:border-gray-700 hover:shadow-md transition-shadow">
-              <div class="flex items-center justify-between mb-4">
-                <div class="p-3 bg-green-50 dark:bg-green-900/20 rounded-lg">
-                  <Zap class="w-6 h-6 text-green-600 dark:text-green-400" />
-                </div>
-                <span class="text-xs font-medium text-gray-500 dark:text-gray-400">7日内</span>
-              </div>
-              <div class="space-y-1">
-                <p class="text-sm text-gray-600 dark:text-gray-400">活跃用户</p>
-                <p class="text-2xl font-bold text-gray-900 dark:text-gray-100">{{ stats.activeUsers || 0 }}</p>
-              </div>
-            </div>
-
-            <!-- 总搜索次数 -->
-            <div class="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm border border-gray-200 dark:border-gray-700 hover:shadow-md transition-shadow">
-              <div class="flex items-center justify-between mb-4">
-                <div class="p-3 bg-emerald-50 dark:bg-emerald-900/20 rounded-lg">
-                  <svg class="w-6 h-6 text-emerald-600 dark:text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                  </svg>
-                </div>
-                <span class="text-xs font-medium text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/20 px-2 py-1 rounded-full">
-                  +{{ stats.todaySearches || 0 }} 今日
-                </span>
-              </div>
-              <div class="space-y-1">
-                <p class="text-sm text-gray-600 dark:text-gray-400">总搜索次数</p>
-                <p class="text-2xl font-bold text-gray-900 dark:text-gray-100">{{ stats.totalSearches || 0 }}</p>
-              </div>
-            </div>
-
-            <!-- 视频源数量 -->
-            <div class="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm border border-gray-200 dark:border-gray-700 hover:shadow-md transition-shadow">
-              <div class="flex items-center justify-between mb-4">
-                <div class="p-3 bg-orange-50 dark:bg-orange-900/20 rounded-lg">
-                  <Video class="w-6 h-6 text-orange-600 dark:text-orange-400" />
-                </div>
-                <span class="text-xs font-medium text-gray-500 dark:text-gray-400">已配置</span>
-              </div>
-              <div class="space-y-1">
-                <p class="text-sm text-gray-600 dark:text-gray-400">视频源数量</p>
-                <p class="text-2xl font-bold text-gray-900 dark:text-gray-100">{{ stats.totalVideoSources || 0 }}</p>
-              </div>
-            </div>
-          </div>
-
-          <!-- 趋势图表 -->
-          <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
-            <!-- 用户增长趋势 -->
-            <div class="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm border border-gray-200 dark:border-gray-700">
-              <div class="flex items-center justify-between mb-6">
-                <h3 class="text-base font-semibold text-gray-900 dark:text-gray-100">用户增长趋势</h3>
-                <span class="text-xs text-gray-500 dark:text-gray-400">最近 7 天</span>
-              </div>
-              <div class="h-48 flex items-end justify-between gap-2">
-                <div v-for="(item, idx) in stats.userTrend" :key="idx" class="flex-1 flex flex-col items-center gap-2 group">
-                  <div class="relative w-full">
-                    <div
-                      class="w-full bg-gradient-to-t from-blue-500 to-blue-400 rounded-t-lg transition-all duration-300 hover:from-blue-600 hover:to-blue-500 cursor-pointer"
-                      :style="{ height: (item.count / Math.max(...stats.userTrend.map(i => i.count), 1) * 160) + 'px', minHeight: '4px' }"
-                    >
-                      <div class="absolute -top-8 left-1/2 -translate-x-1/2 bg-gray-900 dark:bg-gray-700 text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none">
-                        {{ item.count }} 人
-                      </div>
-                    </div>
-                  </div>
-                  <span class="text-xs text-gray-500 dark:text-gray-400">{{ item.date }}</span>
-                </div>
-              </div>
-            </div>
-
-            <!-- 搜索趋势 -->
-            <div class="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm border border-gray-200 dark:border-gray-700">
-              <div class="flex items-center justify-between mb-6">
-                <h3 class="text-base font-semibold text-gray-900 dark:text-gray-100">搜索趋势</h3>
-                <span class="text-xs text-gray-500 dark:text-gray-400">最近 7 天</span>
-              </div>
-              <div class="h-48 flex items-end justify-between gap-2">
-                <div v-for="(item, idx) in stats.searchTrend" :key="idx" class="flex-1 flex flex-col items-center gap-2 group">
-                  <div class="relative w-full">
-                    <div
-                      class="w-full bg-gradient-to-t from-emerald-500 to-emerald-400 rounded-t-lg transition-all duration-300 hover:from-emerald-600 hover:to-emerald-500 cursor-pointer"
-                      :style="{ height: (item.count / Math.max(...stats.searchTrend.map(i => i.count), 1) * 160) + 'px', minHeight: '4px' }"
-                    >
-                      <div class="absolute -top-8 left-1/2 -translate-x-1/2 bg-gray-900 dark:bg-gray-700 text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none">
-                        {{ item.count }} 次
-                      </div>
-                    </div>
-                  </div>
-                  <span class="text-xs text-gray-500 dark:text-gray-400">{{ item.date }}</span>
-                </div>
-              </div>
-            </div>
-          </div>
+          <AdminOverview :stats="stats" :loading="statsLoading" :error="statsError" :updated-at="statsUpdatedAt" @refresh="fetchStats" />
 
           <div class="space-y-4">
 
@@ -926,10 +826,7 @@ async function handleImportData() {
                 <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">站点名称</label>
                 <input v-model="siteSettings.SiteName" type="text" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-transparent" />
     </div>
-                <div>
-                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">站点公告</label>
-                <textarea v-model="siteSettings.Announcement" rows="3" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-transparent" />
-    </div>
+                <AnnouncementEditor v-model="siteSettings.Announcements" :disabled="isLoading('saveSiteConfig')" />
                 <div>
                 <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">搜索接口可拉取最大页数</label>
                 <input v-model.number="siteSettings.SearchDownstreamMaxPage" type="number" min="1" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-transparent" />
@@ -1012,15 +909,15 @@ async function handleImportData() {
     </div>
                 <component :is="expandedTabs.users ? ChevronUp : ChevronDown" class="w-5 h-5 text-gray-500 dark:text-gray-400" />
   </button>
-                <div v-if="expandedTabs.users" class="px-6 py-4">
-                <div v-if="isLoading('fetchUsers')" class="flex justify-center py-10">
+                <div v-if="expandedTabs.users" class="px-3 py-4 sm:px-6">
+                <div v-if="isLoading('fetchUsers') && !usersLoaded" class="flex justify-center py-10">
       <Loader2 class="w-8 h-8 animate-spin text-blue-500" />
     </div>
                 <div v-else>
       <!-- 操作栏 -->
-                <div class="flex justify-between items-center mb-4">
+                <div class="flex flex-wrap justify-between items-center gap-2 mb-4">
                 <span class="text-sm text-gray-500 dark:text-gray-400">共 {{ users.length }} 个用户</span>
-                <button @click="showAddUserForm = !showAddUserForm" class="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors">
+                <button @click="showAddUserForm = !showAddUserForm" class="inline-flex min-h-10 items-center gap-1.5 px-3 py-1.5 text-sm font-medium bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors">
           <Plus class="w-4 h-4" />
           {{ showAddUserForm ? '取消' : '添加用户' }}
         </button>
@@ -1036,7 +933,7 @@ async function handleImportData() {
       <!-- 修改密码表单 -->
                 <div v-if="showChangePasswordForm" class="mb-4 p-4 rounded-xl bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 space-y-3">
                 <div class="flex items-center justify-between">
-                <span class="text-sm font-medium text-gray-700 dark:text-gray-300">修改密码: {{ changePasswordUser.username }}</span>
+                <span class="min-w-0 break-all text-sm font-medium text-gray-700 dark:text-gray-300">修改密码: {{ changePasswordUser.username }}</span>
                 <button @click="showChangePasswordForm = false" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"><X class="w-4 h-4" /></button>
         </div>
                 <input v-model="changePasswordUser.password" type="password" placeholder="新密码" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
@@ -1044,103 +941,18 @@ async function handleImportData() {
           {{ isLoading('changePassword') ? '修改中...' : '确认修改' }}
         </button>
       </div>
-      <!-- 用户列表 -->
-                <div class="overflow-x-auto">
-                <table class="w-full text-sm">
-                <thead>
-                <tr class="border-b border-gray-200 dark:border-gray-700">
-                <th class="text-left py-3 px-2 font-medium text-gray-500 dark:text-gray-400">用户</th>
-                <th class="text-left py-3 px-2 font-medium text-gray-500 dark:text-gray-400">角色</th>
-                <th class="text-left py-3 px-2 font-medium text-gray-500 dark:text-gray-400">状态</th>
-                <th class="text-left py-3 px-2 font-medium text-gray-500 dark:text-gray-400">设备码</th>
-                <th class="text-left py-3 px-2 font-medium text-gray-500 dark:text-gray-400">最后登录</th>
-                <th class="text-right py-3 px-2 font-medium text-gray-500 dark:text-gray-400">操作</th>
-            </tr>
-          </thead>
-                <tbody>
-                <tr v-for="user in users" :key="user.id" class="border-b border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
-                <td class="py-3 px-2">
-                <div class="flex items-center gap-3">
-                  <img
-                    v-if="user.avatar"
-                    :src="user.avatar"
-                    class="w-8 h-8 rounded-full object-cover flex-shrink-0"
-                  />
-                  <div v-else class="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-semibold flex-shrink-0" style="background-color: #2563EB">
-                    {{ user.username.charAt(0).toUpperCase() }}
-                  </div>
-                  <span class="font-medium text-gray-900 dark:text-gray-100">{{ user.username }}</span>
-                </div>
-              </td>
-              <td class="py-3 px-2">
-                <span :class="['inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium', user.role === 'owner' ? 'bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-200' : user.role === 'admin' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-200' : 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200']">
-                  {{ user.role === 'owner' ? '站长' : user.role === 'admin' ? '管理员' : '用户' }}
-                </span>
-              </td>
-              <td class="py-3 px-2">
-                <span :class="['inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium', user.banned ? 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-200' : 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-200']">
-                  {{ user.banned ? '已封禁' : '正常' }}
-                </span>
-              </td>
-              <td class="py-3 px-2">
-                <div v-if="user.machineCodes && user.machineCodes.length > 0" class="text-xs space-y-1">
-                  <div
-                    v-for="(mc, idx) in user.machineCodes.slice(0, 2)"
-                    :key="idx"
-                    class="font-mono text-gray-900 dark:text-gray-100 break-all cursor-help"
-                    :title="`设备码: ${mc.machineCode}\n设备名称: ${mc.deviceName || '未设置'}\n创建时间: ${new Date(mc.createdAt).toLocaleString('zh-CN')}\n最后使用: ${mc.lastUsedAt ? new Date(mc.lastUsedAt).toLocaleString('zh-CN') : '未使用'}`"
-                  >
-                    {{ mc.machineCode.substring(0, 16) }}...
-                  </div>
-                  <span
-                    v-if="user.machineCodes.length > 2"
-                    class="text-gray-500 dark:text-gray-400 cursor-help"
-                    :title="user.machineCodes.slice(2).map(mc => `${mc.machineCode} (${mc.deviceName || '未命名'})`).join('\n')"
-                  >
-                    +{{ user.machineCodes.length - 2 }} 更多
-                  </span>
-                </div>
-                <span v-else class="text-gray-500 dark:text-gray-400 text-xs">未绑定</span>
-              </td>
-              <td class="py-3 px-2">
-                <span v-if="user.lastLoginAt" class="text-xs text-gray-600 dark:text-gray-400">
-                  {{ new Date(user.lastLoginAt).toLocaleString('zh-CN') }}
-                </span>
-                <span v-else class="text-gray-400 text-xs">从未登录</span>
-              </td>
-              <td class="py-3 px-2">
-                <div v-if="user.role !== 'owner'" class="flex items-center justify-end gap-1 flex-wrap">
-                  <!-- 封禁/解封 -->
-                  <button v-if="!user.banned" @click="handleBanUser(user.username)" :disabled="isLoading(`ban_${user.username}`)" class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800 hover:bg-yellow-200 dark:bg-yellow-900/40 dark:hover:bg-yellow-900/60 dark:text-yellow-200 transition-colors">
-                    <Ban class="w-3 h-3 mr-1" />封禁
-                  </button>
-                  <button v-else @click="handleUnbanUser(user.username)" :disabled="isLoading(`unban_${user.username}`)" class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800 hover:bg-green-200 dark:bg-green-900/40 dark:hover:bg-green-900/60 dark:text-green-200 transition-colors">
-                    <UserCheck class="w-3 h-3 mr-1" />解封
-                  </button>
-                  <!-- 设为管理员/取消管理员 (仅站长可操作) -->
-                  <template v-if="role === 'owner'">
-                    <button v-if="user.role === 'user'" @click="handleSetAdmin(user.username)" :disabled="isLoading(`setAdmin_${user.username}`)" class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800 hover:bg-blue-200 dark:bg-blue-900/40 dark:hover:bg-blue-900/60 dark:text-blue-200 transition-colors">
-                      <Shield class="w-3 h-3 mr-1" />设为管理员
-                    </button>
-                    <button v-if="user.role === 'admin'" @click="handleCancelAdmin(user.username)" :disabled="isLoading(`cancelAdmin_${user.username}`)" class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800 hover:bg-gray-200 dark:bg-gray-700/40 dark:hover:bg-gray-700/60 dark:text-gray-200 transition-colors">
-                      <Shield class="w-3 h-3 mr-1" />取消管理员
-                    </button>
-                  </template>
-                  <!-- 修改密码 -->
-                  <button @click="handleShowChangePassword(user.username)" class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800 hover:bg-blue-200 dark:bg-blue-900/40 dark:hover:bg-blue-900/60 dark:text-blue-200 transition-colors">
-                    <KeyRound class="w-3 h-3 mr-1" />改密
-                  </button>
-                  <!-- 删除 -->
-                  <button @click="handleDeleteUser(user.username)" class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800 hover:bg-red-200 dark:bg-red-900/40 dark:hover:bg-red-900/60 dark:text-red-200 transition-colors">
-                    <Trash2 class="w-3 h-3 mr-1" />删除
-                  </button>
-                </div>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-        <div v-if="users.length === 0" class="text-center py-10 text-gray-500 dark:text-gray-400">暂无用户数据</div>
-      </div>
+      <AdminUserList
+        :users="users"
+        :viewer-role="role"
+        :loading-keys="loadingKeys"
+        :refreshing="isLoading('fetchUsers')"
+        @ban="handleBanUser"
+        @unban="handleUnbanUser"
+        @set-admin="handleSetAdmin"
+        @cancel-admin="handleCancelAdmin"
+        @change-password="handleShowChangePassword"
+        @delete="handleDeleteUser"
+      />
     </div>
               </div>
             </div>

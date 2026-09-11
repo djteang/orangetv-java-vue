@@ -296,7 +296,7 @@ onUnmounted(() => {
       <div v-if="isOpen" class="fixed inset-0 z-[9998]" @click="closePanel"></div>
       <div
         v-if="isOpen"
-        class="fixed right-4 top-14 md:right-16 md:top-12 z-[9999] w-80 max-h-[70vh] bg-white dark:bg-gray-800 rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden flex flex-col"
+        class="desktop-header-popover fixed right-4 top-14 md:right-16 md:top-12 z-[9999] w-80 max-h-[70vh] bg-white dark:bg-gray-800 rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden flex flex-col"
       >
         <!-- Tab 栏 -->
         <div class="flex border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
@@ -370,7 +370,7 @@ onUnmounted(() => {
                     :src="user.avatar"
                     class="w-8 h-8 rounded-full object-cover flex-shrink-0"
                   />
-                  <div v-else class="w-8 h-8 rounded-full flex items-center justify-center text-white text-sm font-semibold flex-shrink-0" style="background-color: #2563EB">
+                  <div v-else class="w-8 h-8 rounded-full flex items-center justify-center bg-blue-600 text-white text-sm font-semibold flex-shrink-0">
                     {{ user.username.charAt(0).toUpperCase() }}
                   </div>
                   <span class="flex-1 text-sm text-gray-800 dark:text-gray-200 truncate">{{ user.username }}</span>
@@ -422,7 +422,7 @@ onUnmounted(() => {
                   :src="friend.avatar"
                   class="w-8 h-8 rounded-full object-cover"
                 />
-                <div v-else class="w-8 h-8 rounded-full flex items-center justify-center text-white text-sm font-semibold" style="background-color: #2563EB">
+                <div v-else class="w-8 h-8 rounded-full flex items-center justify-center bg-blue-600 text-white text-sm font-semibold">
                   {{ friend.username.charAt(0).toUpperCase() }}
                 </div>
                 <!-- 在线状态指示器 -->

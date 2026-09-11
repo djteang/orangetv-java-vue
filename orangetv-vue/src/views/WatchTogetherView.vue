@@ -1,9 +1,13 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed, nextTick } from 'vue'
+import { ref, shallowRef, onMounted, onUnmounted, computed, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import PageLayout from '@/components/PageLayout.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
+import { useWatchReactions } from '@/composables/useWatchReactions'
+import WatchReactionDock from '@/components/watch-together/WatchReactionDock.vue'
+import WatchReactionStage from '@/components/watch-together/WatchReactionStage.vue'
+import { isWatchEffectType } from '@/utils/watchReactions'
 import { useWebSocket } from '@/services/websocket'
 import request from '@/api/index'
 import type { WatchRoom, WatchSyncState, WatchChatMessage, WatchEffect, WatchEffectType } from '@/types'
@@ -22,6 +26,7 @@ const hostUsername = computed(() => route.query.host as string)
 
 const playerRef = ref<HTMLDivElement | null>(null)
 const artInstance = ref<Artplayer | null>(null)
+const reactionTarget = shallowRef<HTMLElement | null>(null)
 const chatContainerRef = ref<HTMLDivElement | null>(null)
 
 const videoInfo = ref<WatchRoom['video_info'] | null>(null)
@@ -35,19 +40,10 @@ const chatMessages = ref<WatchChatMessage[]>([])
 const chatInput = ref('')
 const showChat = ref(true)
 const isMobile = ref(false)
-const effects = ref<WatchEffect[]>([])
-const floatingEmojis = ref<{ id: string; emoji: string; x: number; delay: number }[]>([])
+const { bursts, activity, addEffect } = useWatchReactions()
+const effectsEnabled = ref(true)
 const roomLoading = ref(true)
 const roomError = ref('')
-
-const effectTypes: { type: WatchEffectType; emoji: string; label: string }[] = [
-  { type: 'heart', emoji: '❤️', label: '爱心' },
-  { type: 'like', emoji: '👍', label: '点赞' },
-  { type: 'clap', emoji: '👏', label: '鼓掌' },
-  { type: 'fire', emoji: '🔥', label: '火热' },
-  { type: 'laugh', emoji: '😂', label: '大笑' },
-  { type: 'wow', emoji: '😮', label: '惊叹' },
-]
 
 function checkMobile() { isMobile.value = window.innerWidth < 768 }
 
@@ -65,6 +61,8 @@ function initPlayer(url: string, cover?: string) {
       },
     },
   })
+  // 挂到播放器内部，网页全屏和浏览器全屏时仍能看到互动。
+  reactionTarget.value = artInstance.value.template.$player
   artInstance.value.on('play', () => sendSyncState(true))
   artInstance.value.on('pause', () => sendSyncState(false))
   artInstance.value.on('seek', () => sendSyncState(artInstance.value!.playing))
@@ -117,35 +115,22 @@ function handleSendChat() {
   nextTick(() => { if (chatContainerRef.value) chatContainerRef.value.scrollTop = chatContainerRef.value.scrollHeight })
 }
 
+let effectSequence = 0
+function createEffectId() { return `effect-${Date.now().toString(36)}-${++effectSequence}` }
+
 function handleSendEffect(type: WatchEffectType) {
   if (!authStore.user) return
-  sendMessage('/watch-together', {
-    type: 'watch_effect',
-    room_id: roomId.value,
-    effect: { type, sender: authStore.user.username },
-  })
-  addEffect({ id: Date.now().toString(), type, sender: authStore.user.username, timestamp: Date.now() })
-}
-
-function addEffect(effect: WatchEffect) {
-  effects.value.push(effect)
-  // 生成多个飘动的 emoji 粒子
-  const emoji = effectTypes.find(e => e.type === effect.type)?.emoji || '❤️'
-  const particleCount = 8 + Math.floor(Math.random() * 5) // 8-12 个粒子
-  for (let i = 0; i < particleCount; i++) {
-    const particle = {
-      id: `${effect.id}-${i}`,
-      emoji,
-      x: 60 + Math.random() * 35, // 从右侧 60%-95% 的位置飘出
-      delay: i * 0.1, // 依次延迟出现
+  const effect: WatchEffect = { id: createEffectId(), type, sender: authStore.user.username, timestamp: Date.now() }
+  try {
+    const sent = sendMessage('/watch-together', { type: 'watch_effect', room_id: roomId.value, effect })
+    if (!sent) {
+      toast.error('互动发送失败，请连接恢复后重试')
+      return
     }
-    floatingEmojis.value.push(particle)
+    addEffect(effect)
+  } catch {
+    toast.error('互动发送失败，请稍后重试')
   }
-  // 清理粒子
-  setTimeout(() => {
-    effects.value = effects.value.filter(e => e.id !== effect.id)
-    floatingEmojis.value = floatingEmojis.value.filter(p => !p.id.startsWith(effect.id))
-  }, 4000)
 }
 
 function handleLeave() {
@@ -208,8 +193,13 @@ function setupSubscriptions() {
     }),
     subscribe('watch_effect', (msg) => {
       const data = msg.data as any
+      if (!data || typeof data !== 'object') return
+      const effectRoomId = data.room_id ?? data.roomId
+      if (effectRoomId && effectRoomId !== roomId.value) return
       const effect = data.effect || data
-      if (effect && effect.sender !== authStore.user?.username) addEffect({ id: effect.id || Date.now().toString(), type: effect.type, sender: effect.sender, timestamp: effect.timestamp || Date.now() })
+      if (isWatchEffectType(effect?.type) && typeof effect.sender === 'string' && effect.sender !== authStore.user?.username) {
+        addEffect({ id: effect.id || createEffectId(), type: effect.type, sender: effect.sender, timestamp: effect.timestamp || Date.now() })
+      }
     }),
     subscribe('watch_invite_accept', (msg) => {
       const data = msg.data as any
@@ -366,17 +356,17 @@ onUnmounted(() => {
     </div>
 
     <!-- 主内容 -->
-    <div v-else class="min-h-screen bg-gray-50 dark:bg-gray-900">
+    <div v-else class="scene-page-surface min-h-screen bg-gray-50 dark:bg-gray-900">
       <!-- 顶部栏 -->
-      <div class="sticky top-0 z-30 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-4 py-3">
+      <div class="watch-room-header sticky top-0 z-30 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-4 py-3">
         <div class="flex items-center justify-between max-w-7xl mx-auto">
-          <div class="flex items-center gap-3">
-            <div>
+          <div class="flex min-w-0 flex-1 items-center gap-3">
+            <div class="min-w-0">
               <h1 class="font-semibold text-gray-900 dark:text-white truncate max-w-[200px] md:max-w-none">{{ videoInfo.title }}</h1>
               <p class="text-xs text-gray-500">第 {{ videoInfo.episode_index + 1 }} 集 · 共同观影</p>
             </div>
           </div>
-          <div class="flex items-center gap-3">
+          <div class="flex flex-shrink-0 items-center gap-3">
             <!-- 群聊风格头像组 -->
             <div class="flex items-center gap-2">
               <!-- 头像堆叠容器 -->
@@ -420,7 +410,7 @@ onUnmounted(() => {
                 </p>
               </div>
             </div>
-            <button @click="handleLeave" class="flex items-center gap-1 px-3 py-1.5 text-sm text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors">
+            <button @click="handleLeave" aria-label="退出共同观影房间" class="flex items-center gap-1 px-3 py-1.5 text-sm text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors">
               <LogOut class="w-4 h-4" /><span class="hidden md:inline">退出</span>
             </button>
           </div>
@@ -431,75 +421,26 @@ onUnmounted(() => {
       <div class="max-w-7xl mx-auto p-4">
         <div :class="['grid gap-4', isMobile ? 'grid-cols-1' : 'grid-cols-3']">
           <!-- 播放器区域 -->
-          <div :class="[isMobile ? '' : 'col-span-2']">
-            <div class="aspect-video bg-black rounded-xl overflow-hidden relative">
+          <div class="min-w-0" :class="[isMobile ? '' : 'col-span-2']">
+            <div class="watch-player aspect-video bg-black rounded-xl overflow-hidden relative">
               <div ref="playerRef" class="w-full h-full"></div>
-              <!-- 特效覆盖层 - 精美飘动效果 -->
-              <div class="pointer-events-none absolute inset-0 z-10 overflow-hidden">
-                <!-- 飘动的 emoji 粒子 - 从中间向上飘动 -->
-                <div
-                  v-for="particle in floatingEmojis"
-                  :key="particle.id"
-                  class="absolute floating-emoji"
-                  :style="{
-                    left: particle.x + '%',
-                    top: '50%',
-                    animationDelay: particle.delay + 's',
-                    '--float-x': (Math.random() - 0.5) * 80 + 'px',
-                    '--float-y': (Math.random() - 0.5) * 40 + 'px',
-                  }"
-                >
-                  <span class="text-3xl md:text-4xl drop-shadow-lg">{{ particle.emoji }}</span>
-                </div>
-                <!-- 特效通知横幅 -->
-                <TransitionGroup name="effect-banner">
-                  <div
-                    v-for="effect in effects"
-                    :key="effect.id"
-                    class="absolute top-4 left-1/2 -translate-x-1/2 effect-banner"
-                  >
-                    <div class="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-pink-500/90 via-purple-500/90 to-indigo-500/90 backdrop-blur-sm rounded-full shadow-lg shadow-purple-500/30">
-                      <span class="text-2xl animate-pulse">{{ effectTypes.find(e => e.type === effect.type)?.emoji }}</span>
-                      <span class="text-white font-medium text-sm">{{ effect.sender }} 送出了 {{ effectTypes.find(e => e.type === effect.type)?.label }}</span>
-                    </div>
-                  </div>
-                </TransitionGroup>
-              </div>
+              <Teleport :to="reactionTarget || 'body'" :disabled="!reactionTarget">
+                <WatchReactionStage v-if="effectsEnabled" :bursts="bursts" :current-user="authStore.user?.username || ''" />
+              </Teleport>
               <!-- 非房主：遮挡底部控制栏，阻止操作 -->
               <div v-if="!isHost" class="absolute bottom-0 left-0 right-0 h-12 z-20 cursor-not-allowed" @click.stop.prevent="toast.info('仅房主可控制播放')"></div>
             </div>
-            <!-- 移动端特效按钮 -->
-            <div v-if="isMobile" class="mt-3 bg-white dark:bg-gray-800 rounded-xl p-2">
-              <div class="flex justify-around">
-                <button
-                  v-for="et in effectTypes" :key="et.type"
-                  @click="handleSendEffect(et.type)"
-                  class="flex flex-col items-center gap-1 p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-                >
-                  <span class="text-xl">{{ et.emoji }}</span>
-                  <span class="text-[10px] text-gray-500">{{ et.label }}</span>
-                </button>
-              </div>
-            </div>
+            <WatchReactionDock
+              v-model:effects-enabled="effectsEnabled"
+              :connected="isConnected"
+              :activity="activity"
+              :current-user="authStore.user?.username || ''"
+              @send="handleSendEffect"
+            />
           </div>
 
           <!-- 桌面端侧边栏 -->
-          <div v-if="!isMobile" class="flex flex-col gap-4">
-            <!-- 特效按钮 -->
-            <div class="bg-white dark:bg-gray-800 rounded-xl p-3">
-              <h3 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">互动特效</h3>
-              <div class="grid grid-cols-3 gap-2">
-                <button
-                  v-for="et in effectTypes" :key="et.type"
-                  @click="handleSendEffect(et.type)"
-                  class="flex flex-col items-center gap-1 p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-                >
-                  <span class="text-xl">{{ et.emoji }}</span>
-                  <span class="text-xs text-gray-500">{{ et.label }}</span>
-                </button>
-              </div>
-            </div>
-
+          <div v-if="!isMobile" class="flex min-w-0 flex-col gap-4">
             <!-- 聊天区域 -->
             <div class="bg-white dark:bg-gray-800 rounded-xl flex flex-col" :class="showChat ? 'flex-1 min-h-[300px]' : ''">
               <div class="flex items-center justify-between p-3" :class="showChat ? 'border-b border-gray-200 dark:border-gray-700' : ''">
@@ -529,7 +470,7 @@ onUnmounted(() => {
                 </div>
                 <div class="p-3 border-t border-gray-200 dark:border-gray-700">
                   <div class="flex gap-2">
-                    <input v-model="chatInput" type="text" placeholder="发送消息..." @keyup.enter="handleSendChat" class="flex-1 px-3 py-2 bg-gray-100 dark:bg-gray-700 rounded-lg text-sm text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                    <input v-model="chatInput" type="text" placeholder="发送消息..." @keyup.enter="handleSendChat" class="min-w-0 flex-1 px-3 py-2 bg-gray-100 dark:bg-gray-700 rounded-lg text-sm text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
                     <button @click="handleSendChat" :disabled="!chatInput.trim()" class="p-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed">
                       <Send class="w-4 h-4" />
                     </button>
@@ -569,7 +510,7 @@ onUnmounted(() => {
             </div>
             <div class="p-3 border-t border-gray-200 dark:border-gray-700">
               <div class="flex gap-2">
-                <input v-model="chatInput" type="text" placeholder="发送消息..." @keyup.enter="handleSendChat" class="flex-1 px-3 py-2 bg-gray-100 dark:bg-gray-700 rounded-lg text-sm text-gray-900 dark:text-white focus:outline-none" />
+                <input v-model="chatInput" type="text" placeholder="发送消息..." @keyup.enter="handleSendChat" class="min-w-0 flex-1 px-3 py-2 bg-gray-100 dark:bg-gray-700 rounded-lg text-sm text-gray-900 dark:text-white focus:outline-none" />
                 <button @click="handleSendChat" :disabled="!chatInput.trim()" class="p-2 bg-blue-500 text-white rounded-lg disabled:opacity-50">
                   <Send class="w-4 h-4" />
                 </button>
@@ -588,72 +529,14 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-/* 飘动的 emoji 动画 - 从中间向上散开 */
-.floating-emoji {
-  animation: floatUp 3s ease-out forwards;
-  opacity: 0;
-  transform: translate(-50%, -50%);
+.watch-player { container-type: inline-size; }
+@container (max-width: 360px) {
+  .watch-player :deep(.art-control:not(.art-control-time)) { min-width: 32px; width: 32px; }
+  .watch-player :deep(.art-control-time) { padding: 0 3px; font-size: 11px; }
+}
+:global(html[data-theme='chinese-red'] .watch-room-header) { top: calc(var(--china-controls-height) + 16px); }
+@media (max-width: 767px) {
+  :global(html[data-theme='chinese-red'] .watch-room-header) { top: calc(3rem + var(--china-mobile-controls-row)); }
 }
 
-@keyframes floatUp {
-  0% {
-    transform: translate(-50%, -50%) translateX(0) translateY(var(--float-y, 0)) scale(0.3) rotate(0deg);
-    opacity: 0;
-  }
-  15% {
-    opacity: 1;
-    transform: translate(-50%, -50%) translateX(calc(var(--float-x, 0) * 0.3)) translateY(calc(var(--float-y, 0) - 20px)) scale(1.2) rotate(-5deg);
-  }
-  40% {
-    opacity: 1;
-    transform: translate(-50%, -50%) translateX(calc(var(--float-x, 0) * 0.7)) translateY(-60px) scale(1) rotate(5deg);
-  }
-  70% {
-    opacity: 0.7;
-    transform: translate(-50%, -50%) translateX(var(--float-x, 0)) translateY(-100px) scale(0.9) rotate(-3deg);
-  }
-  100% {
-    transform: translate(-50%, -50%) translateX(calc(var(--float-x, 0) * 1.2)) translateY(-150px) scale(0.5) rotate(0deg);
-    opacity: 0;
-  }
-}
-
-/* 特效横幅动画 */
-.effect-banner {
-  animation: bannerPop 0.5s cubic-bezier(0.68, -0.55, 0.265, 1.55);
-}
-
-@keyframes bannerPop {
-  0% {
-    transform: translateX(-50%) scale(0) translateY(-20px);
-    opacity: 0;
-  }
-  60% {
-    transform: translateX(-50%) scale(1.1) translateY(0);
-  }
-  100% {
-    transform: translateX(-50%) scale(1) translateY(0);
-    opacity: 1;
-  }
-}
-
-/* TransitionGroup 动画 */
-.effect-banner-enter-active {
-  animation: bannerPop 0.5s cubic-bezier(0.68, -0.55, 0.265, 1.55);
-}
-
-.effect-banner-leave-active {
-  animation: bannerFadeOut 0.3s ease-out forwards;
-}
-
-@keyframes bannerFadeOut {
-  0% {
-    transform: translateX(-50%) scale(1) translateY(0);
-    opacity: 1;
-  }
-  100% {
-    transform: translateX(-50%) scale(0.8) translateY(-10px);
-    opacity: 0;
-  }
-}
 </style>

@@ -20,27 +20,33 @@ const colors = {
 </script>
 
 <template>
-  <div class="fixed top-4 right-4 z-[9999] flex flex-col gap-2">
-    <TransitionGroup name="toast">
-      <div
-        v-for="toast in toasts"
-        :key="toast.id"
-        class="flex items-center gap-3 px-4 py-3 rounded-lg shadow-lg bg-white dark:bg-gray-800 min-w-[280px] max-w-[400px]"
-      >
-        <component
-          :is="icons[toast.type]"
-          :class="['w-5 h-5 flex-shrink-0', colors[toast.type].replace('bg-', 'text-')]"
-        />
-        <span class="flex-1 text-sm text-gray-700 dark:text-gray-200">{{ toast.message }}</span>
-        <button
-          @click="removeToast(toast.id)"
-          class="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+  <Teleport to="body">
+    <div class="fixed top-4 right-4 z-[9999] flex w-[calc(100%-2rem)] flex-col gap-2 pointer-events-none sm:w-auto" aria-label="消息提示">
+      <TransitionGroup name="toast">
+        <div
+          v-for="toast in toasts"
+          :key="toast.id"
+          :role="toast.type === 'error' ? 'alert' : 'status'"
+          aria-atomic="true"
+          class="pointer-events-auto flex w-full items-center gap-3 px-4 py-3 rounded-lg shadow-lg bg-white dark:bg-gray-800 sm:min-w-[280px] sm:max-w-[400px]"
         >
-          <X class="w-4 h-4 text-gray-400" />
-        </button>
-      </div>
-    </TransitionGroup>
-  </div>
+          <component
+            :is="icons[toast.type]"
+            :class="['w-5 h-5 flex-shrink-0', colors[toast.type].replace('bg-', 'text-')]"
+          />
+          <span class="min-w-0 flex-1 break-words text-sm text-gray-700 dark:text-gray-200">{{ toast.message }}</span>
+          <button
+            type="button"
+            aria-label="关闭提示"
+            @click="removeToast(toast.id)"
+            class="flex-shrink-0 p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+          >
+            <X class="w-4 h-4 text-gray-400" />
+          </button>
+        </div>
+      </TransitionGroup>
+    </div>
+  </Teleport>
 </template>
 
 <style scoped>

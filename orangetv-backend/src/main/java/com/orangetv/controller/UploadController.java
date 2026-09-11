@@ -146,4 +146,52 @@ public class UploadController {
             throw ApiException.internal("图片下载失败: " + e.getMessage());
         }
     }
+
+    @PostMapping("/voice")
+    public ApiResponse<Map<String, String>> uploadVoice(@RequestParam("file") MultipartFile file) {
+        if (file.isEmpty()) {
+            throw ApiException.badRequest("文件不能为空");
+        }
+
+        // Validate file type
+        String contentType = file.getContentType();
+        if (contentType == null || (!contentType.startsWith("audio/") && !contentType.equals("video/webm"))) {
+            throw ApiException.badRequest("只支持音频文件");
+        }
+
+        // Limit file size (10MB)
+        if (file.getSize() > 10 * 1024 * 1024) {
+            throw ApiException.badRequest("语音大小不能超过10MB");
+        }
+
+        try {
+            // Generate unique filename
+            String originalFilename = file.getOriginalFilename();
+            String extension = originalFilename != null && originalFilename.contains(".")
+                ? originalFilename.substring(originalFilename.lastIndexOf("."))
+                : ".webm";
+            String filename = UUID.randomUUID().toString() + extension;
+
+            // Get absolute path for upload directory
+            Path uploadDir = Paths.get(uploadPath, "voice").toAbsolutePath();
+            Files.createDirectories(uploadDir);
+            Path filePath = uploadDir.resolve(filename);
+
+            log.info("Uploading voice file to: {}", filePath);
+
+            // Use Files.copy instead of transferTo for better compatibility
+            try (InputStream inputStream = file.getInputStream()) {
+                Files.copy(inputStream, filePath, StandardCopyOption.REPLACE_EXISTING);
+            }
+
+            log.info("Voice file uploaded successfully: {}", filePath);
+
+            // Return access URL
+            String url = "/uploads/voice/" + filename;
+            return ApiResponse.success(Map.of("url", url));
+        } catch (IOException e) {
+            log.error("Failed to upload voice file: {}", e.getMessage(), e);
+            throw ApiException.internal("语音上传失败: " + e.getMessage());
+        }
+    }
 }

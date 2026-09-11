@@ -50,6 +50,9 @@ const videoLoadingStage = ref<'initing' | 'sourceChanging'>('initing')
 let lastSaveTime = 0
 const SAVE_INTERVAL = 5000 // 5秒保存一次
 
+// 待恢复的播放进度（秒）
+const pendingSeekTime = ref(0)
+
 // 换源相关
 const availableSources = ref<SearchResult[]>([])
 const sourceSearchLoading = ref(false)
@@ -445,14 +448,18 @@ async function fetchVideoDetail() {
       router.replace({ path: '/play', query: newQuery })
     }
 
-    // 从 URL 或播放记录获取集数
+    // 从 URL 或播放记录获取集数和播放进度
     const urlEpisode = route.query.episode as string
+    const record = userStore.playRecords[`${actualSource.value}+${actualId.value}`]
     if (urlEpisode) {
       currentEpisode.value = parseInt(urlEpisode)
-    } else {
-      const record = userStore.playRecords[`${actualSource.value}+${actualId.value}`]
-      if (record) {
-        currentEpisode.value = record.index
+      if (record && record.index === currentEpisode.value && record.play_time > 0) {
+        pendingSeekTime.value = record.play_time
+      }
+    } else if (record) {
+      currentEpisode.value = record.index
+      if (record.play_time > 0) {
+        pendingSeekTime.value = record.play_time
       }
     }
 
@@ -622,6 +629,10 @@ function initPlayer() {
 
   artInstance.value.on('ready', () => {
     isVideoLoading.value = false
+    if (pendingSeekTime.value > 0 && artInstance.value) {
+      artInstance.value.currentTime = pendingSeekTime.value
+      pendingSeekTime.value = 0
+    }
   })
 
   artInstance.value.on('video:playing', () => {

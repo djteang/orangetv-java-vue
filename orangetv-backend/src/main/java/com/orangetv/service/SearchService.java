@@ -11,7 +11,11 @@ import org.springframework.web.client.RestTemplate;
 
 import com.orangetv.exception.ApiException;
 
-import java.net.URLEncoder;
+import org.springframework.web.util.UriComponentsBuilder;
+import org.springframework.web.util.UriUtils;
+import java.net.URI;
+import java.util.function.BooleanSupplier;
+import java.util.function.Consumer;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.*;
@@ -286,90 +290,60 @@ public class SearchService {
         return YELLOW_CONTENT_PATTERN.matcher(combined).find();
     }
 
-    @SuppressWarnings("unchecked")
     private List<Map<String, Object>> searchSource(Map<String, Object> source, String keyword) {
-        String sourceName = (String) source.get("name");
-        String api = (String) source.get("api");
-        String sourceKey = source.get("key").toString();
-
+        List<Map<String, Object>> results = new ArrayList<>();
         try {
-            String encodedKeyword = URLEncoder.encode(keyword, StandardCharsets.UTF_8);
-            String searchUrl = api + "?ac=videolist&wd=" + encodedKeyword;
-
-            // 带浏览器模拟头发起请求，避免被 CDN/WAF 拦截（521/403 等）
-            HttpHeaders headers = new HttpHeaders();
-            headers.set("User-Agent", USER_AGENT);
-            headers.set("Accept", "application/json, text/plain, */*");
-            headers.set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8");
-            headers.set("Accept-Encoding", "gzip, deflate");
-            headers.set("Connection", "keep-alive");
-            headers.set("Cache-Control", "no-cache");
-            HttpEntity<Void> entity = new HttpEntity<>(headers);
-
-            ResponseEntity<String> responseEntity;
-            try {
-                responseEntity = restTemplate.exchange(searchUrl, HttpMethod.GET, entity, String.class);
-            } catch (Exception e) {
-                log.warn("Failed to connect to source {}: {}", sourceName, e.getMessage());
-                return Collections.emptyList();
-            }
-
-            String response = responseEntity.getBody();
-            if (response == null || response.isBlank()) {
-                return Collections.emptyList();
-            }
-
-            // 检查响应是否为有效 JSON（过滤 "搜索关闭"、"暂不支持搜索" 等纯文本响应）
-            response = response.trim();
-            if (!response.startsWith("{") && !response.startsWith("[")) {
-                log.debug("Source {} returned non-JSON response, skipping", sourceName);
-                return Collections.emptyList();
-            }
-
-            JsonNode root;
-            try {
-                root = objectMapper.readTree(response);
-            } catch (Exception e) {
-                log.debug("Source {} returned invalid JSON, skipping", sourceName);
-                return Collections.emptyList();
-            }
-
-            JsonNode listNode = root.get("list");
-            if (listNode == null || !listNode.isArray() || listNode.isEmpty()) {
-                return Collections.emptyList();
-            }
-
-            // 获取分页信息，搜索后续页
-            int maxPages = siteConfigService.getIntConfig("search_downstream_max_page", 1);
-            int pageCount = root.has("pagecount") ? root.get("pagecount").asInt(1) : 1;
-
-            List<Map<String, Object>> allResults = new ArrayList<>(parseResultList(listNode, sourceKey, sourceName));
-
-            // 抓取后续页（如果配置允许）
-            if (maxPages > 1 && pageCount > 1) {
-                int pagesToFetch = Math.min(pageCount, maxPages);
-                for (int page = 2; page <= pagesToFetch; page++) {
-                    try {
-                        String pageUrl = api + "?ac=videolist&wd=" + encodedKeyword + "&pg=" + page;
-                        ResponseEntity<String> pageResponse = restTemplate.exchange(pageUrl, HttpMethod.GET, entity, String.class);
-                        String pageBody = pageResponse.getBody();
-                        if (pageBody != null && !pageBody.isBlank()) {
-                            JsonNode pageRoot = objectMapper.readTree(pageBody.trim());
-                            JsonNode pageList = pageRoot.get("list");
-                            if (pageList != null && pageList.isArray() && !pageList.isEmpty()) {
-                                allResults.addAll(parseResultList(pageList, sourceKey, sourceName));
-                            }
-                        }
-                    } catch (Exception e) {
-                        log.debug("Failed to fetch page {} from source {}", page, sourceName);
-                    }
-                }
-            }
-
-            return allResults.stream().limit(50).collect(Collectors.toList());
+            searchSourcePages(source, keyword, restTemplate, results::addAll,
+                    () -> Thread.currentThread().isInterrupted());
         } catch (Exception e) {
-            log.warn("Failed to search source {}: {}", sourceName, e.getMessage());
-            return Collections.emptyList();
+            log.debug("Source search failed: {}", source.get("name"));
+        }
+        return results;
+    }
+
+    List<Map<String, Object>> filterSearchResults(List<Map<String, Object>> results, String keyword) {
+        return filterYellowContent(filterIrrelevantContent(results, keyword));
+    }
+
+    // 每一页到达后立即交付，不让后续页阻塞首批结果。
+    void searchSourcePages(Map<String, Object> source, String keyword, RestTemplate client,
+                           Consumer<List<Map<String, Object>>> onPage, BooleanSupplier cancelled) {
+        String sourceName = String.valueOf(source.get("name"));
+        String sourceKey = String.valueOf(source.get("key"));
+        String api = String.valueOf(source.get("api"));
+        int maxPages = Math.max(1, siteConfigService.getIntConfig("search_downstream_max_page", 1));
+        int pageCount = 1;
+        int received = 0;
+        HttpHeaders headers = new HttpHeaders();
+        headers.set("User-Agent", USER_AGENT);
+        headers.set("Accept", "application/json, text/plain, */*");
+        headers.set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8");
+        HttpEntity<Void> entity = new HttpEntity<>(headers);
+
+        for (int page = 1; page <= pageCount && received < 50; page++) {
+            if (cancelled.getAsBoolean() || Thread.currentThread().isInterrupted()) return;
+            // URI 重载避免中文关键词被 RestTemplate 再次编码，并保留源的鉴权参数。
+            URI url = UriComponentsBuilder.fromHttpUrl(api)
+                    .replaceQueryParam("ac", "videolist")
+                    .replaceQueryParam("wd", UriUtils.encode(keyword, StandardCharsets.UTF_8))
+                    .replaceQueryParam("pg", page)
+                    .build(true).toUri();
+            String body = client.exchange(url, HttpMethod.GET, entity, String.class).getBody();
+            if (cancelled.getAsBoolean() || Thread.currentThread().isInterrupted()) return;
+            try {
+                if (body == null || body.isBlank()) throw new IllegalStateException("Empty source response");
+                JsonNode root = objectMapper.readTree(body.trim());
+                JsonNode list = root.get("list");
+                if (list == null || !list.isArray()) throw new IllegalStateException("Invalid source response");
+                if (list.isEmpty()) return;
+                if (page == 1) pageCount = Math.min(maxPages, Math.max(1, root.path("pagecount").asInt(1)));
+                List<Map<String, Object>> parsed = parseResultList(list, sourceKey, sourceName);
+                List<Map<String, Object>> batch = new ArrayList<>(parsed.subList(0, Math.min(parsed.size(), 50 - received)));
+                received += batch.size();
+                onPage.accept(batch);
+            } catch (java.io.IOException e) {
+                throw new IllegalStateException("Invalid source JSON", e);
+            }
         }
     }
 

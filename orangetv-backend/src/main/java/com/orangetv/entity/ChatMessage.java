@@ -34,6 +34,9 @@ public class ChatMessage {
     @Builder.Default
     private String messageType = "text";
 
+    @Column(name = "voice_duration")
+    private Integer voiceDuration;
+
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
