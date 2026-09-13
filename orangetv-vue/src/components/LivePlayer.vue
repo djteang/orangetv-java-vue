@@ -62,9 +62,9 @@ function fail(message: string, current: number) {
   player?.video.pause()
 }
 
-function armTimeout(current: number) {
+function armTimeout(current: number, delay = 15000) {
   if (timeout) return
-  timeout = setTimeout(() => fail('连接直播超时，请重试或手动切换频道。', current), 15000)
+  timeout = setTimeout(() => fail('连接直播超时，请重试或手动切换频道。', current), delay)
 }
 
 async function requestPlay(video: HTMLVideoElement, current: number) {
@@ -134,7 +134,8 @@ async function startPlayback() {
   let headers = livePlaybackHeaders(props.source, props.channel)
   let transport: typeof import('mpegts.js').default | null = null
   let mediaRecoveries = 0
-  armTimeout(current)
+  // 格式探测与后续播放分别计时，让后端有机会返回具体的连接错误。
+  armTimeout(current, type === 'auto' && !direct ? 30000 : 15000)
 
   try {
     if (type === 'auto' && !direct) {
@@ -150,6 +151,8 @@ async function startPlayback() {
       headers = liveHeadersForUrl(headers, url, result.url)
       url = result.url
       type = result.type
+      clearTimeoutGuard()
+      armTimeout(current)
     } else if (type === 'auto') {
       type = 'hls'
     }

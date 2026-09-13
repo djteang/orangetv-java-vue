@@ -169,11 +169,12 @@ public class LiveService {
                 liveSourceRepository.save(source);
             }
 
-            return Map.of(
+            // Redis 的 NON_FINAL 类型序列化需要可携带类型信息的缓存根对象。
+            return new LinkedHashMap<>(Map.of(
                     "source", source.getName(),
                     "channels", channels,
                     "epgUrl", source.getEpgUrl() != null ? source.getEpgUrl() : ""
-            );
+            ));
         } catch (Exception e) {
             log.error("Failed to fetch channels from source: {}", source.getName(), e);
             String message = e instanceof ResourceAccessException
@@ -208,7 +209,7 @@ public class LiveService {
                     URI.create(source.getEpgUrl()), HttpMethod.GET, entity, String.class);
             String epgContent = response.getBody();
 
-            return Map.of("source", source.getName(), "epg", epgContent);
+            return new LinkedHashMap<>(Map.of("source", source.getName(), "epg", epgContent));
         } catch (Exception e) {
             log.error("Failed to fetch EPG from source: {}", source.getName(), e);
             return Map.of("error", e.getMessage(), "programs", Collections.emptyMap());
