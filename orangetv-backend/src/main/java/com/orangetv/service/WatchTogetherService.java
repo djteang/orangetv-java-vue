@@ -11,6 +11,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.orangetv.util.AppTime;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -433,7 +434,7 @@ public class WatchTogetherService {
     @Transactional
     public void cleanupExpiredRooms() {
         // 清理等待超过30分钟的房间
-        LocalDateTime waitingExpireTime = LocalDateTime.now().minusMinutes(30);
+        LocalDateTime waitingExpireTime = AppTime.now().minusMinutes(30);
         List<WatchRoom> expiredWaitingRooms = watchRoomRepository.findExpiredWaitingRooms(waitingExpireTime);
         for (WatchRoom room : expiredWaitingRooms) {
             room.setStatus("ended");
@@ -444,7 +445,7 @@ public class WatchTogetherService {
         }
 
         // 清理结束超过24小时的房间记录
-        LocalDateTime endedExpireTime = LocalDateTime.now().minusHours(24);
+        LocalDateTime endedExpireTime = AppTime.now().minusHours(24);
         List<WatchRoom> oldEndedRooms = watchRoomRepository.findOldEndedRooms(endedExpireTime);
         watchRoomRepository.deleteAll(oldEndedRooms);
         log.info("清理旧房间记录: count={}", oldEndedRooms.size());

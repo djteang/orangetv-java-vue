@@ -6,6 +6,7 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import com.orangetv.util.AppTime;
 import java.time.LocalDateTime;
 
 /**
@@ -61,8 +62,8 @@ public class WatchRoom {
 
     @PrePersist
     protected void onCreate() {
-        createdAt = LocalDateTime.now();
-        updatedAt = LocalDateTime.now();
+        createdAt = AppTime.now();
+        updatedAt = AppTime.now();
         if (status == null) {
             status = "waiting";
         }
@@ -70,6 +71,6 @@ public class WatchRoom {
 
     @PreUpdate
     protected void onUpdate() {
-        updatedAt = LocalDateTime.now();
+        updatedAt = AppTime.now();
     }
 }

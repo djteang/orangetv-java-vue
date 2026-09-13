@@ -2,11 +2,14 @@
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import { useSiteStore } from '@/stores/site'
+import { isYellowFilterChange, readDisableYellowFilter, writeDisableYellowFilter, YELLOW_FILTER_CHANGE_EVENT } from '@/utils/yellowFilter'
 import { useToast } from '@/composables/useToast'
 import { CURRENT_VERSION } from '@/lib/version'
 import { checkForUpdates, UpdateStatus } from '@/lib/version_check'
 import { changePassword } from '@/api/auth'
 import request from '@/api/index'
+import { LIVE_PLAYBACK_MODE_EVENT, readLiveDirectConnect, writeLiveDirectConnect } from '@/utils/live'
 import {
   Camera, Check, ChevronDown, ExternalLink, KeyRound, LogOut,
   Settings, Shield, User, X, Upload,
@@ -15,6 +18,7 @@ import VersionPanel from './VersionPanel.vue'
 
 const router = useRouter()
 const authStore = useAuthStore()
+const siteStore = useSiteStore()
 const toast = useToast()
 
 // --- 面板状态 ---
@@ -54,7 +58,9 @@ const defaultAggregateSearch = ref(true)
 const doubanProxyUrl = ref('')
 const enableOptimization = ref(true)
 const fluidSearch = ref(true)
-const liveDirectConnect = ref(false)
+const disableYellowFilter = ref(readDisableYellowFilter())
+const effectiveDisableYellowFilter = computed(() => siteStore.yellowFilterApplyGlobally ? siteStore.disableYellowFilter : disableYellowFilter.value)
+const liveDirectConnect = ref(readLiveDirectConnect())
 const doubanDataSource = ref('cmliussss-cdn-tencent')
 const doubanImageProxyType = ref('cmliussss-cdn-tencent')
 const doubanImageProxyUrl = ref('')
@@ -131,6 +137,10 @@ onMounted(() => {
 
   // 读取本地设置
   loadSettings()
+  window.addEventListener(LIVE_PLAYBACK_MODE_EVENT, syncLivePlaybackMode)
+  window.addEventListener('storage', syncLivePlaybackMode)
+  window.addEventListener(YELLOW_FILTER_CHANGE_EVENT, syncYellowFilter)
+  window.addEventListener('storage', syncYellowFilter)
 
   // 获取头像
   if (authStore.user?.username) fetchUserAvatar(authStore.user.username)
@@ -141,11 +151,16 @@ onMounted(() => {
 
 onUnmounted(() => {
   window.removeEventListener('resize', checkMobile)
+  window.removeEventListener(LIVE_PLAYBACK_MODE_EVENT, syncLivePlaybackMode)
+  window.removeEventListener('storage', syncLivePlaybackMode)
+  window.removeEventListener(YELLOW_FILTER_CHANGE_EVENT, syncYellowFilter)
+  window.removeEventListener('storage', syncYellowFilter)
   document.body.style.overflow = ''
   document.documentElement.style.overflow = ''
 })
 
 function loadSettings() {
+  disableYellowFilter.value = readDisableYellowFilter()
   const s = (k: string) => localStorage.getItem(k)
   if (s('defaultAggregateSearch') !== null) defaultAggregateSearch.value = JSON.parse(s('defaultAggregateSearch')!)
   if (s('doubanDataSource') !== null) doubanDataSource.value = s('doubanDataSource')!
@@ -169,7 +184,12 @@ function handleLogout() {
 
 function handleAdminPanel() { handleCloseMenu(); router.push('/admin') }
 
-function handleSettings() { isOpen.value = false; isSettingsOpen.value = true }
+function handleSettings() {
+  isOpen.value = false
+  disableYellowFilter.value = readDisableYellowFilter()
+  isSettingsOpen.value = true
+  void siteStore.fetchConfig()
+}
 function handleCloseSettings() { isSettingsOpen.value = false }
 
 // --- 修改密码 ---
@@ -346,7 +366,18 @@ function saveSetting(key: string, value: any) { localStorage.setItem(key, typeof
 function handleAggregateToggle(v: boolean) { defaultAggregateSearch.value = v; saveSetting('defaultAggregateSearch', v) }
 function handleOptimizationToggle(v: boolean) { enableOptimization.value = v; saveSetting('enableOptimization', v) }
 function handleFluidSearchToggle(v: boolean) { fluidSearch.value = v; saveSetting('fluidSearch', v) }
-function handleLiveDirectConnectToggle(v: boolean) { liveDirectConnect.value = v; saveSetting('liveDirectConnect', v) }
+function syncYellowFilter(event: Event) {
+  if (isYellowFilterChange(event)) disableYellowFilter.value = readDisableYellowFilter()
+}
+function handleYellowFilterToggle(disabled: boolean) {
+  if (siteStore.yellowFilterApplyGlobally) return
+  disableYellowFilter.value = disabled
+  writeDisableYellowFilter(disabled)
+}
+function syncLivePlaybackMode(event: Event) {
+  liveDirectConnect.value = event instanceof CustomEvent && typeof event.detail === 'boolean' ? event.detail : readLiveDirectConnect()
+}
+function handleLiveDirectConnectToggle(v: boolean) { liveDirectConnect.value = v; writeLiveDirectConnect(v) }
 function handleDoubanDataSourceChange(v: string) { doubanDataSource.value = v; saveSetting('doubanDataSource', v); isDoubanDropdownOpen.value = false }
 function handleDoubanProxyUrlChange(v: string) { doubanProxyUrl.value = v; saveSetting('doubanProxyUrl', v) }
 function handleDoubanImageProxyTypeChange(v: string) { doubanImageProxyType.value = v; saveSetting('doubanImageProxyType', v); isDoubanImageProxyDropdownOpen.value = false }
@@ -359,6 +390,9 @@ function handleResetSettings() {
   const keys = ['defaultAggregateSearch','enableOptimization','fluidSearch','liveDirectConnect','doubanDataSource','doubanProxyUrl','doubanImageProxyType','doubanImageProxyUrl']
   const vals = [true, true, true, false, 'cmliussss-cdn-tencent', '', 'cmliussss-cdn-tencent', '']
   keys.forEach((k, i) => saveSetting(k, vals[i]))
+  writeLiveDirectConnect(false)
+  disableYellowFilter.value = false
+  writeDisableYellowFilter(false)
 }
 
 // 点击外部关闭下拉框
@@ -575,6 +609,23 @@ onUnmounted(() => document.removeEventListener('mousedown', onDocClick))
               </label>
             </div>
 
+            <!-- 黄色内容过滤 -->
+            <div class="flex items-center justify-between gap-4">
+              <div>
+                <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300">禁用黄色过滤器</h4>
+                <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                  {{ siteStore.yellowFilterApplyGlobally ? (siteStore.disableYellowFilter ? '管理员已全局禁用过滤，当前设置由站点统一管理。' : '管理员已全局开启过滤，当前设置由站点统一管理。') : '开启后，此浏览器的搜索结果不再过滤黄色内容。' }}
+                </p>
+              </div>
+              <label :class="['flex items-center flex-shrink-0', siteStore.yellowFilterApplyGlobally ? 'cursor-not-allowed opacity-60' : 'cursor-pointer']">
+                <div class="relative">
+                  <input type="checkbox" class="sr-only peer" aria-label="禁用黄色过滤器" :checked="effectiveDisableYellowFilter" :disabled="siteStore.yellowFilterApplyGlobally" @change="handleYellowFilterToggle(($event.target as HTMLInputElement).checked)" />
+                  <div class="w-11 h-6 bg-gray-300 rounded-full peer-checked:bg-green-500 transition-colors dark:bg-gray-600 peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-green-500"></div>
+                  <div class="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform peer-checked:translate-x-5"></div>
+                </div>
+              </label>
+            </div>
+
             <!-- 流式搜索 -->
             <div class="flex items-center justify-between">
               <div>
@@ -594,11 +645,11 @@ onUnmounted(() => document.removeEventListener('mousedown', onDocClick))
             <div class="flex items-center justify-between">
               <div>
                 <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300">IPTV 视频浏览器直连</h4>
-                <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">开启 IPTV 视频浏览器直连时，需要自备 Allow CORS 插件</p>
+                <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">由浏览器直接连接直播源；无法播放时可关闭并使用站点代理。</p>
               </div>
               <label class="flex items-center cursor-pointer">
                 <div class="relative">
-                  <input type="checkbox" class="sr-only peer" :checked="liveDirectConnect" @change="handleLiveDirectConnectToggle(($event.target as HTMLInputElement).checked)" />
+                  <input type="checkbox" class="sr-only peer" aria-label="IPTV 视频浏览器直连" :checked="liveDirectConnect" @change="handleLiveDirectConnectToggle(($event.target as HTMLInputElement).checked)" />
                   <div class="w-11 h-6 bg-gray-300 rounded-full peer-checked:bg-green-500 transition-colors dark:bg-gray-600"></div>
                   <div class="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform peer-checked:translate-x-5"></div>
                 </div>

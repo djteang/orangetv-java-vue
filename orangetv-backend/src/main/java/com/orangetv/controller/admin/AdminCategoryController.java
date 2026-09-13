@@ -46,6 +46,27 @@ public class AdminCategoryController {
                     categories.add(new java.util.LinkedHashMap<>(category));
                     break;
                 }
+                case "edit": {
+                    Object rawIndex = request.get("index");
+                    if (!(rawIndex instanceof Number number) || number.doubleValue() != number.intValue()
+                            || number.intValue() < 0 || number.intValue() >= categories.size()) {
+                        return ResponseEntity.badRequest().body(ApiResponse.error(400, "分类不存在"));
+                    }
+                    Map<String, Object> category = categories.get(number.intValue());
+                    if (!"custom".equals(category.get("from"))) {
+                        return ResponseEntity.badRequest().body(ApiResponse.error(400, "只能编辑自定义分类"));
+                    }
+                    String name = request.get("name") instanceof String value ? value.trim() : "";
+                    String type = request.get("type") instanceof String value ? value : "";
+                    String query = request.get("query") instanceof String value ? value.trim() : "";
+                    if (name.isEmpty() || query.isEmpty() || !List.of("movie", "tv").contains(type)) {
+                        return ResponseEntity.badRequest().body(ApiResponse.error(400, "请填写分类名称、有效类型和搜索关键词"));
+                    }
+                    category.put("name", name);
+                    category.put("type", type);
+                    category.put("query", query);
+                    break;
+                }
                 case "delete": {
                     int index = ((Number) request.get("index")).intValue();
                     if (index >= 0 && index < categories.size()) {

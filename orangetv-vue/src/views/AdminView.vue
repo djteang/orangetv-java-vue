@@ -1,20 +1,24 @@
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue'
+import { computed, ref, onBeforeUnmount, onMounted, watch, nextTick } from 'vue'
+import { formatDateTime } from '@/utils/datetime'
 import PageLayout from '@/components/PageLayout.vue'
 import AdminUserList from '@/components/AdminUserList.vue'
 import AdminOverview from '@/components/AdminOverview.vue'
-import type { AdminStats } from '@/types/admin'
+import AdminLiveSources from '@/components/AdminLiveSources.vue'
+import AdminFormDialog from '@/components/AdminFormDialog.vue'
+import ThemeSelect from '@/components/ThemeSelect.vue'
+import type { AdminStats, ConfigSyncResult } from '@/types/admin'
 import AnnouncementEditor from '@/components/AnnouncementEditor.vue'
 import { useToast } from '@/composables/useToast'
 import { useSiteStore } from '@/stores/site'
 import { normalizeAnnouncements } from '@/utils/announcements'
 import * as adminApi from '@/api/admin'
-import type { User, VideoSource, LiveSource, SiteConfig, SiteSettings, AdminConfig, CustomCategory, ConfigSubscription } from '@/types'
+import type { User, VideoSource, SiteConfig, SiteSettings, AdminConfig, CustomCategory, ConfigSubscription } from '@/types'
 import {
-  Users, Video, Settings, Loader2, Plus, Trash2, Shield,
+  Users, Video, Radio, Settings, Loader2, Plus, Trash2, Shield,
   Save, ChevronDown, ChevronUp, Pencil,
   X, FileText, FolderOpen, Database, Download, Upload, AlertTriangle,
-  ShieldCheck
+  ShieldCheck, KeyRound
 } from 'lucide-vue-next'
 
 const toast = useToast()
@@ -25,6 +29,7 @@ const loading = ref(true)
 const role = ref<'owner' | 'admin' | null>(null)
 const siteConfig = ref<SiteConfig>({})
 const loadingKeys = ref<Set<string>>(new Set())
+const formError = ref('')
 
 function isLoading(key: string) { return loadingKeys.value.has(key) }
 async function withLoading<T>(key: string, fn: () => Promise<T>): Promise<T> {
@@ -58,8 +63,8 @@ async function fetchConfig() {
     const data = await adminApi.getAdminConfig() as AdminConfig
     role.value = (data.Role === 'owner' || data.Role === 'admin') ? data.Role : null
     siteConfig.value = data.Config || {}
-    configFile.value = (data as any).ConfigFile || ''
-    configSubscription.value = (data as any).ConfigSubscribtion || { URL: '', AutoUpdate: false, LastCheck: '' }
+    configFile.value = data.ConfigFile || ''
+    configSubscription.value = data.ConfigSubscribtion || { URL: '', AutoUpdate: false, LastCheck: '' }
     categories.value = ((data as any).CustomCategories || []) as CustomCategory[]
   } catch {
     toast.error('获取配置失败')
@@ -78,6 +83,7 @@ const siteSettings = ref<SiteSettings>({
   Announcements: [],
   RequireDeviceCode: true,
   DisableYellowFilter: false,
+  YellowFilterApplyGlobally: false,
   FluidSearch: true,
   EnableLinuxDoLogin: false,
   EnableDanmu: false,
@@ -94,6 +100,7 @@ watch(siteConfig, (cfg) => {
       Announcements: normalizeAnnouncements(cfg.announcements, cfg.announcement),
       RequireDeviceCode: cfg.require_device_code !== undefined ? !!cfg.require_device_code : true,
       DisableYellowFilter: !!cfg.disable_yellow_filter,
+      YellowFilterApplyGlobally: cfg.yellow_filter_apply_globally ?? !!cfg.disable_yellow_filter,
       FluidSearch: cfg.fluid_search !== undefined ? !!cfg.fluid_search : true,
       EnableLinuxDoLogin: !!(cfg as any).enable_linuxdo_login,
       EnableDanmu: !!(cfg as any).enable_danmu,
@@ -133,6 +140,24 @@ const changePasswordUser = ref({ username: '', password: '' })
 const showDeleteUserModal = ref(false)
 const deletingUser = ref<string | null>(null)
 
+function openAddUser() {
+  newUser.value = { username: '', password: '' }
+  formError.value = ''
+  showAddUserForm.value = true
+}
+
+function closeAddUser() {
+  showAddUserForm.value = false
+  newUser.value = { username: '', password: '' }
+  formError.value = ''
+}
+
+function closeChangePassword() {
+  showChangePasswordForm.value = false
+  changePasswordUser.value = { username: '', password: '' }
+  formError.value = ''
+}
+
 async function fetchUsers(force = false) {
   if (usersLoaded.value && !force) return
   await withLoading('fetchUsers', async () => {
@@ -144,15 +169,20 @@ async function fetchUsers(force = false) {
 }
 
 async function handleAddUser() {
-  if (!newUser.value.username || !newUser.value.password) return
+  if (isLoading('addUser')) return
+  formError.value = ''
+  if (!newUser.value.username.trim() || !newUser.value.password) {
+    formError.value = '请填写用户名和密码。'
+    return
+  }
   await withLoading('addUser', async () => {
     try {
-      await adminApi.addUser(newUser.value.username, newUser.value.password)
+      await adminApi.addUser(newUser.value.username.trim(), newUser.value.password)
       newUser.value = { username: '', password: '' }
       showAddUserForm.value = false
       await fetchUsers(true)
       toast.success('用户已添加')
-    } catch { toast.error('添加失败') }
+    } catch { formError.value = '添加用户失败，请检查用户名是否重复后重试。' }
   })
 }
 
@@ -197,19 +227,25 @@ async function handleCancelAdmin(username: string) {
 }
 
 function handleShowChangePassword(username: string) {
+  formError.value = ''
   changePasswordUser.value = { username, password: '' }
   showChangePasswordForm.value = true
 }
 
 async function handleChangePassword() {
-  if (!changePasswordUser.value.password) return
+  if (isLoading('changePassword')) return
+  formError.value = ''
+  if (!changePasswordUser.value.password) {
+    formError.value = '请填写新密码。'
+    return
+  }
   await withLoading('changePassword', async () => {
     try {
       await adminApi.changePassword(changePasswordUser.value.username, changePasswordUser.value.password)
       showChangePasswordForm.value = false
       changePasswordUser.value = { username: '', password: '' }
       toast.success('密码已修改')
-    } catch { toast.error('修改密码失败') }
+    } catch { formError.value = '修改密码失败，请稍后重试。' }
   })
 }
 
@@ -243,7 +279,7 @@ async function fetchStats() {
   statsError.value = ''
   try {
     stats.value = await adminApi.getStats()
-    statsUpdatedAt.value = new Date().toLocaleTimeString('zh-CN', { hour12: false })
+    statsUpdatedAt.value = formatDateTime(Date.now(), { hour: '2-digit', minute: '2-digit', second: '2-digit' })
   } catch {
     statsError.value = stats.value ? '刷新失败，当前显示上次更新的数据，请重试。' : '统计数据加载失败，请点击“刷新数据”重试。'
   } finally {
@@ -277,10 +313,37 @@ const speedTestResults = ref<Record<string, {
 
 // 添加表单验证状态
 const newSourceValidation = ref<{ status: string | null; message: string }>({ status: null, message: '' })
-const isNewSourceValidating = ref(false)
 
 // 编辑表单验证状态
 const editSourceValidation = ref<{ status: string | null; message: string }>({ status: null, message: '' })
+const sourceDraft = computed(() => editingSource.value ?? newSource.value)
+const sourceValidation = computed(() => editingSource.value ? editSourceValidation.value : newSourceValidation.value)
+let sourceValidationController: AbortController | undefined
+
+function resetSourceValidation() {
+  sourceValidationController?.abort()
+  newSourceValidation.value = { status: null, message: '' }
+  editSourceValidation.value = { status: null, message: '' }
+}
+
+function openSourceDialog(source?: VideoSource) {
+  resetSourceValidation()
+  formError.value = ''
+  editingSource.value = source ? { ...source } : null
+  newSource.value = { name: '', api: '', detail: '' }
+  showAddSource.value = !source
+}
+
+function closeSourceDialog() {
+  resetSourceValidation()
+  showAddSource.value = false
+  editingSource.value = null
+  newSource.value = { name: '', api: '', detail: '' }
+  formError.value = ''
+}
+
+watch(() => [sourceDraft.value.name, sourceDraft.value.api], resetSourceValidation)
+onBeforeUnmount(() => sourceValidationController?.abort())
 
 async function fetchSources() {
   if (sourcesLoaded.value) return
@@ -293,31 +356,39 @@ async function fetchSources() {
 }
 
 async function handleAddSource() {
-  if (!newSource.value.name || !newSource.value.api) {
-    toast.warning('请填写名称和API地址'); return
+  if (isLoading('addSource')) return
+  formError.value = ''
+  if (!newSource.value.name.trim() || !newSource.value.api.trim()) {
+    formError.value = '请填写视频源名称和 API 地址。'
+    return
   }
   await withLoading('addSource', async () => {
     try {
-      await adminApi.addVideoSource('', newSource.value.name, newSource.value.api, newSource.value.detail)
+      await adminApi.addVideoSource('', newSource.value.name.trim(), newSource.value.api.trim(), newSource.value.detail.trim())
       newSource.value = { name: '', api: '', detail: '' }
       newSourceValidation.value = { status: null, message: '' }
       showAddSource.value = false
       sourcesLoaded.value = false; await fetchSources()
       toast.success('视频源已添加')
-    } catch { toast.error('添加失败') }
+    } catch { formError.value = '添加视频源失败，请检查接口地址后重试。' }
   })
 }
 
 async function handleEditSource() {
-  if (!editingSource.value || !editingSource.value.name || !editingSource.value.api) return
+  if (isLoading('editSource') || !editingSource.value) return
+  formError.value = ''
+  if (!editingSource.value.name.trim() || !editingSource.value.api.trim()) {
+    formError.value = '请填写视频源名称和 API 地址。'
+    return
+  }
   await withLoading('editSource', async () => {
     try {
-      await adminApi.editVideoSource(editingSource.value!.key, editingSource.value!.name, editingSource.value!.api, editingSource.value!.detail)
+      await adminApi.editVideoSource(editingSource.value!.key, editingSource.value!.name.trim(), editingSource.value!.api.trim(), editingSource.value!.detail?.trim())
       editingSource.value = null
       editSourceValidation.value = { status: null, message: '' }
       sourcesLoaded.value = false; await fetchSources()
       toast.success('视频源已更新')
-    } catch { toast.error('编辑失败') }
+    } catch { formError.value = '保存视频源失败，请稍后重试。' }
   })
 }
 
@@ -344,87 +415,68 @@ async function handleDeleteSource(key: string) {
 }
 
 // 有效性检测（SSE 流式验证）
-function handleValidateSource(api: string, name: string, isNew: boolean) {
-  if (!api.trim()) {
-    toast.warning('API地址不能为空')
-    return
-  }
-
+async function handleValidateSource(api: string, name: string, isNew: boolean) {
+  if (!api.trim()) return
+  sourceValidationController?.abort()
+  const controller = new AbortController()
+  sourceValidationController = controller
   const setResult = isNew ? newSourceValidation : editSourceValidation
-  if (isNew) {
-    isNewSourceValidating.value = true
-  }
   setResult.value = { status: 'validating', message: '检测中...' }
-
   const startTime = Date.now()
   const keyword = validationKeyword.value.trim() || '灵笼'
   const baseURL = import.meta.env.VITE_API_BASE_URL || '/api'
   const token = localStorage.getItem('token')
   const url = `${baseURL}/admin/source/validate?q=${encodeURIComponent(keyword)}&tempApi=${encodeURIComponent(api.trim())}&tempName=${encodeURIComponent(name)}`
-
-  fetch(url, {
-    headers: {
-      'Accept': 'text/event-stream',
-      ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
-    },
-  }).then(response => {
-    if (!response.ok) throw new Error(`HTTP ${response.status}`)
-    const reader = response.body?.getReader()
-    if (!reader) throw new Error('No reader')
-    const decoder = new TextDecoder()
-    let buffer = ''
-
-    function read(): Promise<void> {
-      return reader!.read().then(({ done, value }) => {
-        if (done) {
-          if (isNew) isNewSourceValidating.value = false
-          return
-        }
-        buffer += decoder.decode(value, { stream: true })
-        const lines = buffer.split('\n')
-        buffer = lines.pop() || ''
-        for (const line of lines) {
-          if (line.startsWith('data:')) {
-            try {
-              const data = JSON.parse(line.substring(5).trim())
-              const responseTime = Date.now() - startTime
-              if (data.type === 'source_result' || data.type === 'source_error') {
-                if (data.source === 'temp') {
-                  let message = ''
-                  if (data.status === 'valid') {
-                    message = `搜索正常 (${data.resultCount || 0}条结果, ${responseTime}ms)`
-                  } else if (data.status === 'no_results') {
-                    message = `无法搜索到结果 (${responseTime}ms)`
-                  } else {
-                    message = `连接失败: ${data.error || '未知错误'}`
-                  }
-                  setResult.value = { status: data.status, message }
-                }
-              } else if (data.type === 'complete') {
-                if (isNew) isNewSourceValidating.value = false
-              }
-            } catch { /* ignore parse errors */ }
-          }
-        }
-        return read()
-      })
-    }
-    return read()
-  }).catch(err => {
-    if (isNew) isNewSourceValidating.value = false
-    setResult.value = {
-      status: 'invalid',
-      message: `连接错误: ${err instanceof Error ? err.message : '未知错误'}`,
-    }
-  })
-
-  // 30秒超时
-  setTimeout(() => {
-    if (setResult.value.status === 'validating') {
-      if (isNew) isNewSourceValidating.value = false
+  const timeout = setTimeout(() => {
+    if (!controller.signal.aborted && setResult.value.status === 'validating') {
       setResult.value = { status: 'invalid', message: '检测超时（30秒）' }
+      controller.abort()
     }
   }, 30000)
+
+  function applyLine(line: string) {
+    if (!line.startsWith('data:') || controller.signal.aborted) return
+    try {
+      const data = JSON.parse(line.substring(5).trim())
+      if ((data.type === 'source_result' || data.type === 'source_error') && data.source === 'temp') {
+        const responseTime = Date.now() - startTime
+        const message = data.status === 'valid'
+          ? `搜索正常 (${data.resultCount || 0}条结果, ${responseTime}ms)`
+          : data.status === 'no_results' ? `无法搜索到结果 (${responseTime}ms)` : `连接失败: ${data.error || '未知错误'}`
+        setResult.value = { status: data.status, message }
+      }
+    } catch { /* 忽略非结果事件。 */ }
+  }
+
+  try {
+    const response = await fetch(url, {
+      signal: controller.signal,
+      headers: { Accept: 'text/event-stream', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    })
+    if (!response.ok) throw new Error(`HTTP ${response.status}`)
+    const reader = response.body?.getReader()
+    if (!reader) throw new Error('未收到检测结果')
+    const decoder = new TextDecoder()
+    let buffer = ''
+    while (!controller.signal.aborted) {
+      const { done, value } = await reader.read()
+      if (controller.signal.aborted) return
+      buffer += decoder.decode(value, { stream: !done })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() || ''
+      lines.forEach(applyLine)
+      if (done) { applyLine(buffer); break }
+    }
+    if (!controller.signal.aborted && setResult.value.status === 'validating') {
+      setResult.value = { status: 'invalid', message: '未收到有效的检测结果，请重试。' }
+    }
+  } catch (error) {
+    if (!controller.signal.aborted) setResult.value = {
+      status: 'invalid', message: `连接错误: ${error instanceof Error ? error.message : '未知错误'}`,
+    }
+  } finally {
+    clearTimeout(timeout)
+  }
 }
 
 // 批量有效性检测
@@ -541,27 +593,12 @@ async function handleSpeedTest(sourceKey: string, api: string) {
 }
 
 // ─── 直播源管理 ─────────────────────────────────────────────────────────
-const liveSources = ref<LiveSource[]>([])
-const liveLoaded = ref(false)
-// const showAddLive = ref(false)
-// const newLive = ref({ name: '', key: '', url: '', epg: '', ua: '' })
-// const editingLive = ref<LiveSource | null>(null)
-
-async function fetchLiveSources() {
-  if (liveLoaded.value) return
-  await withLoading('fetchLive', async () => {
-    try {
-      liveSources.value = await adminApi.getLiveSources() as LiveSource[]
-      liveLoaded.value = true
-    } catch { toast.error('获取直播源失败') }
-  })
-}
+const liveSourcesRef = ref<InstanceType<typeof AdminLiveSources> | null>(null)
 
 // 展开面板时按需加载数据
 watch(expandedTabs, (tabs) => {
   if (tabs.users && !usersLoaded.value) fetchUsers()
   if (tabs.sources && !sourcesLoaded.value) fetchSources()
-  if (tabs.live && !liveLoaded.value) fetchLiveSources()
 }, { deep: true })
 
 // ─── 配置文件管理 ─────────────────────────────────────────────────────────
@@ -569,6 +606,32 @@ const configFileContent = ref('')
 const configSubUrl = ref('')
 const configSubAutoUpdate = ref(false)
 const configSubLastCheck = ref('')
+const configFileNotice = ref('')
+const configFileError = ref('')
+const configFileWarnings = ref<string[]>([])
+const configSyncResult = ref<ConfigSyncResult | null>(null)
+
+function clearConfigFeedback() {
+  configFileNotice.value = ''
+  configFileError.value = ''
+  configFileWarnings.value = []
+  configSyncResult.value = null
+}
+
+function configErrorMessage(reason: unknown, fallback: string): string {
+  if (reason && typeof reason === 'object') {
+    const error = reason as { message?: unknown; response?: { data?: { message?: unknown } } }
+    const message = error.response?.data?.message ?? error.message
+    if (typeof message === 'string' && message.trim()) return message
+  }
+  return fallback
+}
+
+async function showImportedLiveSources() {
+  expandedTabs.value.live = true
+  await nextTick()
+  document.getElementById('admin-live-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
 
 // Base58 alphabet
 const BASE58_ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
@@ -617,53 +680,117 @@ watch([configFile, configSubscription], ([file, sub]) => {
 }, { immediate: true })
 
 async function handleFetchSubscription() {
-  if (!configSubUrl.value) { toast.warning('请输入订阅 URL'); return }
+  if (!configSubUrl.value.trim()) { toast.warning('请输入订阅 URL'); return }
+  clearConfigFeedback()
   await withLoading('fetchSubscription', async () => {
     try {
-      const result = await adminApi.fetchConfigSubscription(configSubUrl.value) as any
-      const content = result
-      if (typeof content === 'string') {
-        configFileContent.value = tryDecode(content)
-      }
+      configSubUrl.value = configSubUrl.value.trim()
+      const result = await adminApi.fetchConfigSubscription(configSubUrl.value)
+      configFileContent.value = result.content
       configSubLastCheck.value = new Date().toISOString()
-      toast.success('订阅内容已拉取，请检查后点击保存')
-    } catch { toast.error('拉取订阅失败') }
+      configFileWarnings.value = [...result.warnings]
+      if (result.unsupportedChannelCount > 0) {
+        configFileWarnings.value.push(
+          `其中 ${result.unsupportedChannelCount} 个频道使用 RTP/UDP 等非 HTTP 协议，浏览器无法直接播放，需要转换为 HTTP/HLS。`
+        )
+      }
+      configFileNotice.value = result.format === 'json'
+        ? `订阅已拉取：识别到 ${result.videoSources} 个视频源、${result.liveSources} 个直播源。请点击“保存并同步”完成导入。`
+        : `已识别 ${result.format.toUpperCase()} 频道列表，共 ${result.channelCount} 个频道，已生成 1 个直播源配置。请点击“保存并同步”完成导入。`
+      toast.success('订阅已拉取，请保存并同步')
+    } catch (reason) {
+      configFileError.value = configErrorMessage(reason, '拉取订阅失败，请检查地址后重试。')
+      toast.error(configFileError.value)
+    }
   })
 }
 
 async function handleSaveConfigFile() {
+  configFileError.value = ''
+  configFileNotice.value = ''
+  configSyncResult.value = null
   await withLoading('saveConfigFile', async () => {
     try {
-      await adminApi.saveConfigFile({
+      const result = await adminApi.saveConfigFile({
         config_file: configFileContent.value,
         config_subscription_url: configSubUrl.value,
         config_subscription_auto_update: configSubAutoUpdate.value,
       })
-      toast.success('配置文件已保存，视频源/直播源已同步')
       await fetchConfig()
-      // 后端已根据配置内容同步视频源和直播源，重置加载标记以便刷新
       sourcesLoaded.value = false
-      liveLoaded.value = false
       if (expandedTabs.value.sources) await fetchSources()
-      if (expandedTabs.value.live) await fetchLiveSources()
-    } catch { toast.error('保存失败') }
+      if (liveSourcesRef.value) await liveSourcesRef.value.reloadSources()
+      if (result.liveSources > 0) expandedTabs.value.live = true
+      configSyncResult.value = result
+      configFileWarnings.value = [...new Set([...configFileWarnings.value, ...result.warnings])]
+      configFileNotice.value = result.videoSources + result.liveSources > 0
+        ? `配置已保存，已同步 ${result.videoSources} 个视频源、${result.liveSources} 个直播源。`
+        : '配置已保存，本次未同步视频源或直播源。'
+      toast.success(configFileNotice.value)
+    } catch (reason) {
+      configFileError.value = configErrorMessage(reason, '保存失败，请检查配置后重试。')
+      toast.error(configFileError.value)
+    }
   })
 }
 
 // ─── 分类管理 ─────────────────────────────────────────────────────────────
 const newCategory = ref({ name: '', type: 'movie' as 'movie' | 'tv', query: '' })
+const showAddCategory = ref(false)
+const editingCategory = ref<{ index: number; name: string; type: 'movie' | 'tv'; query: string } | null>(null)
+const categoryDraft = computed(() => editingCategory.value ?? newCategory.value)
+const categoryTypeOptions = [{ value: 'movie', label: '电影' }, { value: 'tv', label: '电视剧' }] as const
+const categoryBusy = computed(() => Array.from(loadingKeys.value).some(key => /^(addCategory|editCategory|deleteCategory_|toggleCategory_)/.test(key)))
+
+function openCategoryDialog(index?: number) {
+  const category = index === undefined ? null : categories.value[index]
+  if (categoryBusy.value || (category && category.from !== 'custom')) return
+  formError.value = ''
+  newCategory.value = { name: '', type: 'movie', query: '' }
+  editingCategory.value = category && index !== undefined
+    ? { index, name: category.name ?? '', type: category.type, query: category.query } : null
+  showAddCategory.value = index === undefined
+}
+
+function closeCategoryDialog() {
+  showAddCategory.value = false
+  editingCategory.value = null
+  newCategory.value = { name: '', type: 'movie', query: '' }
+  formError.value = ''
+}
+
+async function handleEditCategory() {
+  if (categoryBusy.value || !editingCategory.value) return
+  const { index, name, type, query } = editingCategory.value
+  formError.value = ''
+  if (!name.trim() || !query.trim()) {
+    formError.value = '请填写分类名称和搜索关键词。'
+    return
+  }
+  await withLoading('editCategory', async () => {
+    try {
+      await adminApi.editCategory(index, name.trim(), type, query.trim())
+      closeCategoryDialog()
+      await fetchConfig()
+      toast.success('分类已更新')
+    } catch { formError.value = '保存分类失败，请稍后重试。' }
+  })
+}
 
 async function handleAddCategory() {
-  if (!newCategory.value.name || !newCategory.value.query) {
-    toast.warning('请填写名称和关键词'); return
+  if (categoryBusy.value) return
+  formError.value = ''
+  if (!newCategory.value.name.trim() || !newCategory.value.query.trim()) {
+    formError.value = '请填写分类名称和搜索关键词。'
+    return
   }
   await withLoading('addCategory', async () => {
     try {
-      await adminApi.addCategory(newCategory.value.name, newCategory.value.type, newCategory.value.query)
-      newCategory.value = { name: '', type: 'movie', query: '' }
+      await adminApi.addCategory(newCategory.value.name.trim(), newCategory.value.type, newCategory.value.query.trim())
+      closeCategoryDialog()
       await fetchConfig()
       toast.success('分类已添加')
-    } catch { toast.error('添加失败') }
+    } catch { formError.value = '添加分类失败，请稍后重试。' }
   })
 }
 
@@ -773,40 +900,49 @@ async function handleImportData() {
                 </div>
                 <component :is="expandedTabs.configFile ? ChevronUp : ChevronDown" class="w-5 h-5 text-gray-500 dark:text-gray-400" />
               </button>
-                          <div v-if="expandedTabs.configFile" class="px-6 py-4 space-y-6">
+              <div v-if="expandedTabs.configFile" class="px-6 py-4 space-y-6">
                 <!-- 订阅 URL -->
                 <div>
-                  <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">订阅 URL</label>
+                  <label for="config-subscription-url" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">订阅 URL（JSON / M3U / TXT）</label>
                   <div class="flex gap-2">
-                    <input v-model="configSubUrl" type="text" placeholder="远程配置订阅地址" class="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-transparent" />
-                    <button @click="handleFetchSubscription" :disabled="isLoading('fetchSubscription')" class="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-gray-600 hover:bg-gray-700 text-white text-sm font-medium transition-colors disabled:opacity-50 whitespace-nowrap">
+                    <input id="config-subscription-url" v-model="configSubUrl" @input="clearConfigFeedback" :disabled="isLoading('fetchSubscription') || isLoading('saveConfigFile')" type="url" placeholder="JSON 配置或 M3U/TXT 频道列表地址" class="min-w-0 flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-transparent" />
+                    <button @click="handleFetchSubscription" :disabled="isLoading('fetchSubscription') || isLoading('saveConfigFile')" class="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-gray-600 hover:bg-gray-700 text-white text-sm font-medium transition-colors disabled:opacity-50 whitespace-nowrap">
                       <Download class="w-4 h-4" />
                       {{ isLoading('fetchSubscription') ? '拉取中...' : '拉取' }}
                     </button>
                   </div>
                 </div>
+                <p class="text-xs leading-5 text-gray-500 dark:text-gray-400">拉取后请检查下方配置，再点击“保存并同步”。导入的直播源会显示在“直播源配置”中。</p>
                 <!-- 自动更新 & 上次检查 -->
                 <div class="flex items-center justify-between">
-                  <div class="flex items-center gap-4">
+                  <div class="flex flex-wrap items-center gap-4">
                     <div class="flex items-center gap-2">
                       <label class="text-sm font-medium text-gray-700 dark:text-gray-300">自动更新</label>
                       <button type="button" @click="configSubAutoUpdate = !configSubAutoUpdate" :class="['relative inline-flex h-6 w-11 items-center rounded-full transition-colors', configSubAutoUpdate ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-700']">
                         <span :class="['inline-block h-4 w-4 transform rounded-full bg-white transition-transform', configSubAutoUpdate ? 'translate-x-6' : 'translate-x-1']" />
                       </button>
                     </div>
-                    <span v-if="configSubLastCheck" class="text-xs text-gray-500 dark:text-gray-400">上次检查: {{ configSubLastCheck }}</span>
+                    <span v-if="configSubLastCheck" class="text-xs text-gray-500 dark:text-gray-400">上次检查: {{ formatDateTime(configSubLastCheck) }}</span>
                   </div>
                 </div>
+                <div v-if="configFileNotice" role="status" class="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm leading-6 text-blue-800 dark:border-blue-800 dark:bg-blue-950/40 dark:text-blue-200">
+                  <p>{{ configFileNotice }}</p>
+                  <button v-if="configSyncResult && configSyncResult.liveSources > 0" type="button" @click="showImportedLiveSources" class="mt-2 font-medium underline underline-offset-4">查看直播源</button>
+                </div>
+                <ul v-if="configFileWarnings.length" aria-label="订阅提示" class="list-disc space-y-1 rounded-lg border border-amber-200 bg-amber-50 py-3 pl-8 pr-4 text-sm leading-6 text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
+                  <li v-for="warning in configFileWarnings" :key="warning">{{ warning }}</li>
+                </ul>
+                <p v-if="configFileError" role="alert" class="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm leading-6 text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-200">{{ configFileError }}</p>
                 <!-- 配置文件内容 -->
                 <div>
-                  <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">配置文件内容</label>
-                  <textarea v-model="configFileContent" rows="20" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-transparent font-mono text-sm" placeholder="JSON 配置内容" />
+                  <label for="config-file-content" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">配置文件内容</label>
+                  <textarea id="config-file-content" v-model="configFileContent" @input="clearConfigFeedback" :disabled="isLoading('fetchSubscription') || isLoading('saveConfigFile')" rows="20" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-transparent font-mono text-sm" placeholder="支持 JSON（含注释）配置、M3U 或 TXT 频道列表" />
                 </div>
                 <!-- 保存按钮 -->
                 <div class="flex justify-end">
-                  <button @click="handleSaveConfigFile" :disabled="isLoading('saveConfigFile')" class="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                  <button @click="handleSaveConfigFile" :disabled="isLoading('saveConfigFile') || isLoading('fetchSubscription')" class="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
                     <Save class="w-4 h-4" />
-                    {{ isLoading('saveConfigFile') ? '保存中...' : '保存' }}
+                    {{ isLoading('saveConfigFile') ? '保存中...' : '保存并同步' }}
                   </button>
                 </div>
               </div>
@@ -849,11 +985,24 @@ async function handleImportData() {
                 <div>
                 <div class="flex items-center justify-between">
                 <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">禁用黄色过滤器</label>
-                <button type="button" @click="siteSettings.DisableYellowFilter = !siteSettings.DisableYellowFilter" :class="['relative inline-flex h-6 w-11 items-center rounded-full transition-colors', siteSettings.DisableYellowFilter ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-700']">
+                <button type="button" role="switch" aria-label="禁用黄色过滤器" :aria-checked="siteSettings.DisableYellowFilter" @click="siteSettings.DisableYellowFilter = !siteSettings.DisableYellowFilter" :class="['relative inline-flex h-6 w-11 items-center rounded-full transition-colors', siteSettings.DisableYellowFilter ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-700']">
                 <span :class="['inline-block h-4 w-4 transform rounded-full bg-white transition-transform', siteSettings.DisableYellowFilter ? 'translate-x-6' : 'translate-x-1']" />
         </button>
       </div>
-                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">禁用黄色内容的过滤功能，允许显示所有内容</p>
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">开启表示不过滤黄色内容，关闭表示启用过滤。</p>
+                <div class="mt-3 flex items-center justify-between gap-4 rounded-lg bg-gray-50 p-3 dark:bg-gray-800/50">
+                  <div class="min-w-0">
+                    <span class="text-sm font-medium text-gray-700 dark:text-gray-300">应用到全局</span>
+                    <p class="mt-1 text-xs leading-relaxed text-gray-500 dark:text-gray-400">
+                      {{ siteSettings.YellowFilterApplyGlobally ? '所有用户统一使用上方设置，本地不可修改。' : '用户可在本地设置中自由开启或关闭过滤。' }}
+                    </p>
+                  </div>
+                  <button type="button" role="switch" aria-label="应用到全局" :aria-checked="siteSettings.YellowFilterApplyGlobally"
+                    @click="siteSettings.YellowFilterApplyGlobally = !siteSettings.YellowFilterApplyGlobally"
+                    :class="['relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500', siteSettings.YellowFilterApplyGlobally ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-700']">
+                    <span :class="['inline-block h-4 w-4 transform rounded-full bg-white transition-transform', siteSettings.YellowFilterApplyGlobally ? 'translate-x-6' : 'translate-x-1']" />
+                  </button>
+                </div>
     </div>
     <!-- 启用流式搜索 -->
                 <div>
@@ -873,7 +1022,7 @@ async function handleImportData() {
                 <span :class="['inline-block h-4 w-4 transform rounded-full bg-white transition-transform', siteSettings.EnableLinuxDoLogin ? 'translate-x-6' : 'translate-x-1']" />
         </button>
       </div>
-                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">允许用户使用 LinuxDO 账号登录（需要信任等级 2+）</p>
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">允许用户使用 LinuxDO 账号登录（需要信任等级 1+）</p>
     </div>
     <!-- 启用弹幕功能 -->
                 <div>
@@ -917,28 +1066,9 @@ async function handleImportData() {
       <!-- 操作栏 -->
                 <div class="flex flex-wrap justify-between items-center gap-2 mb-4">
                 <span class="text-sm text-gray-500 dark:text-gray-400">共 {{ users.length }} 个用户</span>
-                <button @click="showAddUserForm = !showAddUserForm" class="inline-flex min-h-10 items-center gap-1.5 px-3 py-1.5 text-sm font-medium bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors">
+                <button type="button" aria-haspopup="dialog" @click="openAddUser" class="inline-flex min-h-10 items-center gap-1.5 px-3 py-1.5 text-sm font-medium bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors">
           <Plus class="w-4 h-4" />
-          {{ showAddUserForm ? '取消' : '添加用户' }}
-        </button>
-      </div>
-      <!-- 添加用户表单 -->
-                <div v-if="showAddUserForm" class="mb-4 p-4 rounded-xl bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 space-y-3">
-                <input v-model="newUser.username" placeholder="用户名" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                <input v-model="newUser.password" type="password" placeholder="密码" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                <button @click="handleAddUser" :disabled="isLoading('addUser')" class="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium transition-colors disabled:opacity-50">
-          {{ isLoading('addUser') ? '添加中...' : '确认添加' }}
-        </button>
-      </div>
-      <!-- 修改密码表单 -->
-                <div v-if="showChangePasswordForm" class="mb-4 p-4 rounded-xl bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 space-y-3">
-                <div class="flex items-center justify-between">
-                <span class="min-w-0 break-all text-sm font-medium text-gray-700 dark:text-gray-300">修改密码: {{ changePasswordUser.username }}</span>
-                <button @click="showChangePasswordForm = false" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"><X class="w-4 h-4" /></button>
-        </div>
-                <input v-model="changePasswordUser.password" type="password" placeholder="新密码" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                <button @click="handleChangePassword" :disabled="isLoading('changePassword')" class="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium transition-colors disabled:opacity-50">
-          {{ isLoading('changePassword') ? '修改中...' : '确认修改' }}
+          添加用户
         </button>
       </div>
       <AdminUserList
@@ -971,71 +1101,18 @@ async function handleImportData() {
     </div>
                 <div v-else>
       <!-- 操作栏 -->
-                <div class="flex justify-between items-center mb-4">
+                <div class="flex flex-wrap justify-between items-center gap-3 mb-4">
                 <span class="text-sm text-gray-500 dark:text-gray-400">视频源列表</span>
-                <div class="flex items-center gap-2">
+                <div class="flex flex-wrap items-center gap-2">
                 <input v-model="validationKeyword" type="text" placeholder="检测关键词" class="w-28 px-2.5 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500" />
                 <button @click="handleBatchValidation" :disabled="isBatchValidating || videoSources.length === 0" class="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition-colors disabled:opacity-50">
             <ShieldCheck class="w-4 h-4" :class="{ 'animate-spin': isBatchValidating }" />
             {{ isBatchValidating ? '检测中...' : '有效性检测' }}
           </button>
-                <button @click="showAddSource = !showAddSource" class="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors">
+                <button type="button" aria-haspopup="dialog" @click="openSourceDialog()" class="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors">
             <Plus class="w-4 h-4" />
-            {{ showAddSource ? '取消' : '添加视频源' }}
+            添加视频源
           </button>
-        </div>
-      </div>
-      <!-- 添加视频源表单 -->
-                <div v-if="showAddSource" class="mb-4 p-4 rounded-xl bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 space-y-3">
-                <input v-model="newSource.name" placeholder="视频源名称" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                <input v-model="newSource.api" placeholder="API 地址" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                <input v-model="newSource.detail" placeholder="详情接口（可选）" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                <div class="flex items-center gap-2">
-                <button @click="handleValidateSource(newSource.api, newSource.name, true)" :disabled="!newSource.api || isNewSourceValidating" class="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium transition-colors disabled:opacity-50">
-            {{ isNewSourceValidating ? '检测中...' : '有效性检测' }}
-          </button>
-                <button @click="handleAddSource" :disabled="isLoading('addSource')" class="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium transition-colors disabled:opacity-50">
-            {{ isLoading('addSource') ? '添加中...' : '确认添加' }}
-          </button>
-        </div>
-        <!-- 验证结果显示 -->
-                <div v-if="newSourceValidation.status" class="text-sm px-3 py-2 rounded-lg" :class="{
-          'bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300': newSourceValidation.status === 'validating',
-          'bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-300': newSourceValidation.status === 'valid',
-          'bg-yellow-50 dark:bg-yellow-900/20 text-yellow-700 dark:text-yellow-300': newSourceValidation.status === 'no_results',
-          'bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300': newSourceValidation.status === 'invalid',
-        }">
-          {{ newSourceValidation.status === 'validating' ? '⟳' : newSourceValidation.status === 'valid' ? '✓' : newSourceValidation.status === 'no_results' ? '⚠' : '✗' }}
-          {{ newSourceValidation.message }}
-        </div>
-      </div>
-      <!-- 编辑视频源表单 -->
-                <div v-if="editingSource" class="mb-4 p-4 rounded-xl bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 space-y-3">
-                <div class="flex items-center justify-between">
-                <span class="text-sm font-medium text-gray-700 dark:text-gray-300">编辑视频源: {{ editingSource.name }}</span>
-                <button @click="editingSource = null; editSourceValidation = { status: null, message: '' }" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"><X class="w-4 h-4" /></button>
-        </div>
-                <input v-model="editingSource.name" placeholder="视频源名称" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                <input v-model="editingSource.api" placeholder="API 地址" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                <input v-model="editingSource.detail" placeholder="详情接口（可选）" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                <div class="flex gap-2">
-                <button @click="handleValidateSource(editingSource.api, editingSource.name, false)" :disabled="!editingSource.api" class="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium transition-colors disabled:opacity-50">
-            {{ editSourceValidation.status === 'validating' ? '检测中...' : '有效性检测' }}
-          </button>
-                <button @click="handleEditSource" :disabled="isLoading('editSource')" class="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium transition-colors disabled:opacity-50">
-            {{ isLoading('editSource') ? '保存中...' : '保存修改' }}
-          </button>
-                <button @click="editingSource = null; editSourceValidation = { status: null, message: '' }" class="px-3 py-1.5 rounded-lg bg-gray-600 hover:bg-gray-700 text-white text-sm font-medium transition-colors">取消</button>
-        </div>
-        <!-- 验证结果显示 -->
-                <div v-if="editSourceValidation.status" class="text-sm px-3 py-2 rounded-lg" :class="{
-          'bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300': editSourceValidation.status === 'validating',
-          'bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-300': editSourceValidation.status === 'valid',
-          'bg-yellow-50 dark:bg-yellow-900/20 text-yellow-700 dark:text-yellow-300': editSourceValidation.status === 'no_results',
-          'bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300': editSourceValidation.status === 'invalid',
-        }">
-          {{ editSourceValidation.status === 'validating' ? '⟳' : editSourceValidation.status === 'valid' ? '✓' : editSourceValidation.status === 'no_results' ? '⚠' : '✗' }}
-          {{ editSourceValidation.message }}
         </div>
       </div>
       <!-- 视频源表格 -->
@@ -1109,7 +1186,7 @@ async function handleImportData() {
               </td>
                 <td class="py-3 px-2">
                 <div class="flex items-center justify-end gap-1">
-                  <button @click="editingSource = { ...source }; editSourceValidation = { status: null, message: '' }" class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800 hover:bg-blue-200 dark:bg-blue-900/40 dark:hover:bg-blue-900/60 dark:text-blue-200 transition-colors">
+                  <button type="button" aria-haspopup="dialog" :aria-label="'编辑视频源' + source.name" @click="openSourceDialog(source)" class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800 hover:bg-blue-200 dark:bg-blue-900/40 dark:hover:bg-blue-900/60 dark:text-blue-200 transition-colors">
                     <Pencil class="w-3 h-3 mr-1" />编辑
                   </button>
                   <button @click="handleDeleteSource(source.key)" :disabled="isLoading(`deleteSource_${source.key}`)" class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800 hover:bg-red-200 dark:bg-red-900/40 dark:hover:bg-red-900/60 dark:text-red-200 transition-colors">
@@ -1126,6 +1203,20 @@ async function handleImportData() {
   </div>
             </div>
 
+            <!-- ═══════════ 直播源配置 ═══════════ -->
+            <div class="rounded-xl shadow-sm overflow-hidden bg-white/80 backdrop-blur-md dark:bg-gray-800/50 dark:ring-1 dark:ring-gray-700">
+              <button type="button" :aria-expanded="expandedTabs.live" aria-controls="admin-live-panel" @click="toggleTab('live')" class="w-full px-6 py-4 flex items-center justify-between bg-gray-50/70 dark:bg-gray-800/60 hover:bg-gray-100/80 dark:hover:bg-gray-700/60 transition-colors">
+                <div class="flex items-center gap-3">
+                  <Radio class="w-5 h-5 text-gray-600 dark:text-gray-400" aria-hidden="true" />
+                  <h3 class="text-lg font-medium text-gray-900 dark:text-gray-100">直播源配置</h3>
+                </div>
+                <component :is="expandedTabs.live ? ChevronUp : ChevronDown" class="w-5 h-5 text-gray-500 dark:text-gray-400" aria-hidden="true" />
+              </button>
+              <div v-if="expandedTabs.live" id="admin-live-panel">
+                <AdminLiveSources ref="liveSourcesRef" />
+              </div>
+            </div>
+
             <!-- ═══════════ 分类配置 ═══════════ -->
             <div class="rounded-xl shadow-sm overflow-hidden bg-white/80 backdrop-blur-md dark:bg-gray-800/50 dark:ring-1 dark:ring-gray-700">
                 <button @click="toggleTab('categories')" class="w-full px-6 py-4 flex items-center justify-between bg-gray-50/70 dark:bg-gray-800/60 hover:bg-gray-100/80 dark:hover:bg-gray-700/60 transition-colors">
@@ -1136,22 +1227,10 @@ async function handleImportData() {
                 <component :is="expandedTabs.categories ? ChevronUp : ChevronDown" class="w-5 h-5 text-gray-500 dark:text-gray-400" />
   </button>
                 <div v-if="expandedTabs.categories" class="px-6 py-4 space-y-6">
-    <!-- 添加分类表单 -->
-                <div class="p-4 rounded-xl bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 space-y-3">
-                <div class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">添加分类</div>
-                <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <input v-model="newCategory.name" placeholder="分类名称" class="px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-        <select v-model="newCategory.type" class="px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-          <option value="movie">电影</option>
-          <option value="tv">电视剧</option>
-        </select>
-                <input v-model="newCategory.query" placeholder="搜索关键词" class="px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-      </div>
-                <button @click="handleAddCategory" :disabled="isLoading('addCategory')" class="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors disabled:opacity-50">
-        <Plus class="w-4 h-4" />
-        {{ isLoading('addCategory') ? '添加中...' : '添加分类' }}
-      </button>
-    </div>
+                <div class="flex flex-wrap items-center justify-between gap-3">
+                  <span class="text-sm text-theme-text-secondary">共 {{ categories.length }} 个分类</span>
+                  <button type="button" aria-haspopup="dialog" :disabled="categoryBusy" class="inline-flex min-h-10 items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-50" @click="openCategoryDialog()"><Plus class="h-4 w-4" aria-hidden="true" />添加分类</button>
+                </div>
     <!-- 分类表格 -->
                 <div class="overflow-x-auto">
                 <table class="w-full text-sm">
@@ -1174,15 +1253,16 @@ async function handleImportData() {
             </td>
                 <td class="py-3 px-2 text-gray-500 dark:text-gray-400 hidden sm:table-cell">{{ cat.query }}</td>
                 <td class="py-3 px-2 text-center">
-                <button @click="handleToggleCategory(index, !!cat.disabled)" :disabled="isLoading(`toggleCategory_${index}`)" :class="['relative inline-flex h-6 w-11 items-center rounded-full transition-colors', !cat.disabled ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-700']">
+                <button @click="handleToggleCategory(index, !!cat.disabled)" :disabled="categoryBusy" :class="['relative inline-flex h-6 w-11 items-center rounded-full transition-colors', !cat.disabled ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-700']">
                 <span :class="['inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform', !cat.disabled ? 'translate-x-6' : 'translate-x-1']" />
               </button>
             </td>
                 <td class="py-3 px-2">
-                <div class="flex items-center justify-end">
-                <button v-if="cat.from === 'custom'" @click="handleDeleteCategory(index)" :disabled="isLoading(`deleteCategory_${index}`)" class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800 hover:bg-red-200 dark:bg-red-900/40 dark:hover:bg-red-900/60 dark:text-red-200 transition-colors">
-                  <Trash2 class="w-3 h-3 mr-1" />删除
-                </button>
+                <div class="flex flex-wrap items-center justify-end gap-2">
+                <template v-if="cat.from === 'custom'">
+                  <button type="button" aria-haspopup="dialog" :aria-label="'编辑分类' + cat.name" :disabled="categoryBusy" class="inline-flex min-h-9 items-center rounded-lg bg-blue-100 px-2 py-1 text-xs font-medium text-blue-800 transition-colors hover:bg-blue-200 disabled:opacity-50 dark:bg-blue-900/40 dark:text-blue-200 dark:hover:bg-blue-900/60" @click="openCategoryDialog(index)"><Pencil class="mr-1 h-3 w-3" aria-hidden="true" />编辑</button>
+                  <button type="button" :disabled="categoryBusy" class="inline-flex min-h-9 items-center rounded-lg bg-red-100 px-2 py-1 text-xs font-medium text-red-800 transition-colors hover:bg-red-200 disabled:opacity-50 dark:bg-red-900/40 dark:text-red-200 dark:hover:bg-red-900/60" @click="handleDeleteCategory(index)"><Trash2 class="mr-1 h-3 w-3" aria-hidden="true" />删除</button>
+                </template>
                 <span v-else class="text-xs text-gray-400">配置来源</span>
               </div>
             </td>
@@ -1249,6 +1329,48 @@ async function handleImportData() {
         </template>
       </div>
     </div>
+    <AdminFormDialog v-if="showAddUserForm" title="添加用户" description="填写新用户的登录信息。" submit-label="确认添加" busy-label="添加中…" :busy="isLoading('addUser')" :error="formError" @close="closeAddUser" @submit="handleAddUser">
+      <template #icon><Users :size="22" aria-hidden="true" /></template>
+      <div class="admin-form-fields">
+        <label class="admin-form-field"><span>用户名</span><input v-model="newUser.username" name="username" required placeholder="请输入用户名" autocomplete="off" /></label>
+        <label class="admin-form-field"><span>密码</span><input v-model="newUser.password" name="password" type="password" required placeholder="请输入登录密码" autocomplete="new-password" /></label>
+      </div>
+    </AdminFormDialog>
+
+    <AdminFormDialog v-if="showChangePasswordForm" title="修改密码" :description="changePasswordUser.username" submit-label="确认修改" busy-label="修改中…" :busy="isLoading('changePassword')" :error="formError" @close="closeChangePassword" @submit="handleChangePassword">
+      <template #icon><KeyRound :size="22" aria-hidden="true" /></template>
+      <div class="admin-form-fields">
+        <label class="admin-form-field"><span>新密码</span><input v-model="changePasswordUser.password" name="newPassword" type="password" required placeholder="请输入新密码" autocomplete="new-password" /></label>
+      </div>
+    </AdminFormDialog>
+
+    <AdminFormDialog v-if="showAddSource || editingSource" :title="editingSource ? '编辑视频源' : '添加视频源'" description="填写视频源名称和接口地址，可先检测接口是否可用。" :submit-label="editingSource ? '保存修改' : '确认添加'" :busy-label="editingSource ? '保存中…' : '添加中…'" :busy="isLoading(editingSource ? 'editSource' : 'addSource')" :error="formError" @close="closeSourceDialog" @submit="editingSource ? handleEditSource() : handleAddSource()">
+      <template #icon><Video :size="22" aria-hidden="true" /></template>
+      <div class="admin-form-fields">
+        <label class="admin-form-field"><span>视频源名称</span><input v-model="sourceDraft.name" name="sourceName" required placeholder="请输入视频源名称" autocomplete="off" /></label>
+        <label class="admin-form-field"><span>API 地址</span><input v-model="sourceDraft.api" name="sourceApi" type="url" required placeholder="https://example.com/api.php/provide/vod" autocomplete="off" autocapitalize="off" spellcheck="false" /></label>
+        <label class="admin-form-field"><span>详情接口（选填）</span><input v-model="sourceDraft.detail" name="sourceDetail" type="url" placeholder="请输入详情接口地址" autocomplete="off" autocapitalize="off" spellcheck="false" /></label>
+      </div>
+      <p v-if="sourceValidation.status" class="mt-4 rounded-lg px-3 py-2 text-sm leading-6" role="status" :class="{
+        'bg-blue-50 text-blue-700 dark:bg-blue-900/20 dark:text-blue-300': sourceValidation.status === 'validating',
+        'bg-green-50 text-green-700 dark:bg-green-900/20 dark:text-green-300': sourceValidation.status === 'valid',
+        'bg-yellow-50 text-yellow-700 dark:bg-yellow-900/20 dark:text-yellow-300': sourceValidation.status === 'no_results',
+        'bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-300': sourceValidation.status === 'invalid',
+      }">{{ sourceValidation.message }}</p>
+      <template #actions>
+        <button type="button" class="admin-form-button" :disabled="!sourceDraft.api.trim() || sourceValidation.status === 'validating' || isLoading(editingSource ? 'editSource' : 'addSource')" @click="handleValidateSource(sourceDraft.api, sourceDraft.name, !editingSource)"><ShieldCheck :size="16" aria-hidden="true" />{{ sourceValidation.status === 'validating' ? '检测中…' : '有效性检测' }}</button>
+      </template>
+    </AdminFormDialog>
+
+    <AdminFormDialog v-if="showAddCategory || editingCategory" :title="editingCategory ? '编辑分类' : '添加分类'" description="设置分类名称、内容类型和用于搜索的关键词。" :submit-label="editingCategory ? '保存修改' : '确认添加'" :busy-label="editingCategory ? '保存中…' : '添加中…'" :busy="isLoading(editingCategory ? 'editCategory' : 'addCategory')" :error="formError" @close="closeCategoryDialog" @submit="editingCategory ? handleEditCategory() : handleAddCategory()">
+      <template #icon><FolderOpen :size="22" aria-hidden="true" /></template>
+      <div class="admin-form-fields">
+        <label class="admin-form-field"><span>分类名称</span><input v-model="categoryDraft.name" name="categoryName" required placeholder="例如：热门电影" autocomplete="off" /></label>
+        <div class="admin-form-field"><label for="admin-category-type">分类类型</label><ThemeSelect id="admin-category-type" v-model="categoryDraft.type" :options="categoryTypeOptions" label="分类类型" :disabled="categoryBusy" /></div>
+        <label class="admin-form-field"><span>搜索关键词</span><input v-model="categoryDraft.query" name="categoryQuery" required placeholder="请输入搜索关键词" autocomplete="off" /></label>
+      </div>
+    </AdminFormDialog>
+
     <!-- 删除用户确认弹窗 -->
     <Teleport to="body">
       <div v-if="showDeleteUserModal && deletingUser" class="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4" @click="showDeleteUserModal = false; deletingUser = null">

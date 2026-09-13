@@ -40,8 +40,9 @@ public class SearchService {
             Pattern.CASE_INSENSITIVE
     );
 
-    @Cacheable(value = "search", key = "'search_' + #keyword")
-    public Map<String, Object> search(String keyword) {
+    @Cacheable(value = "search", key = "'search_' + #keyword + '_yellow_disabled_' + #root.target.isYellowFilterDisabled(#disableYellowFilter)")
+    public Map<String, Object> search(String keyword, boolean disableYellowFilter) {
+        boolean yellowFilterDisabled = isYellowFilterDisabled(disableYellowFilter);
         List<Map<String, Object>> sources = videoSourceService.getEnabledSources();
         List<Map<String, Object>> allResults = new ArrayList<>();
 
@@ -83,14 +84,13 @@ public class SearchService {
             log.error("Search error: {}", e.getMessage());
         }
 
-        // 先过滤不相关内容，再过滤黄色内容
-        List<Map<String, Object>> filteredResults = filterIrrelevantContent(allResults, keyword);
         Map<String, Object> resultMap = new HashMap<>();
-        resultMap.put("results", filterYellowContent(filteredResults));
+        resultMap.put("results", filterSearchResults(allResults, keyword, yellowFilterDisabled));
         return resultMap;
     }
 
-    public Map<String, Object> searchOne(String keyword, String resourceId) {
+    public Map<String, Object> searchOne(String keyword, String resourceId, boolean disableYellowFilter) {
+        boolean yellowFilterDisabled = isYellowFilterDisabled(disableYellowFilter);
         List<Map<String, Object>> sources = videoSourceService.getEnabledSources();
         Map<String, Object> source = sources.stream()
                 .filter(s -> resourceId.equals(s.get("key").toString()))
@@ -105,11 +105,9 @@ public class SearchService {
         }
 
         List<Map<String, Object>> results = searchSource(source, keyword);
-        // 过滤不相关内容
-        List<Map<String, Object>> filteredResults = filterIrrelevantContent(
-                results != null ? results : Collections.emptyList(), keyword);
         Map<String, Object> resultMap = new HashMap<>();
-        resultMap.put("results", filterYellowContent(filteredResults));
+        resultMap.put("results", filterSearchResults(
+                results != null ? results : Collections.emptyList(), keyword, yellowFilterDisabled));
         return resultMap;
     }
 
@@ -213,9 +211,15 @@ public class SearchService {
         return episodes.get(episodeIndex);
     }
 
-    private List<Map<String, Object>> filterYellowContent(List<Map<String, Object>> results) {
-        Boolean disableFilter = siteConfigService.getBooleanConfig("disable_yellow_filter", false);
-        if (Boolean.TRUE.equals(disableFilter)) {
+    public boolean isYellowFilterDisabled(boolean localDisabled) {
+        boolean siteDisabled = Boolean.TRUE.equals(siteConfigService.getBooleanConfig("disable_yellow_filter", false));
+        // 未设置全局开关的旧站点沿用原行为；显式关闭后完全使用用户本地偏好。
+        boolean applyGlobally = Boolean.TRUE.equals(siteConfigService.getBooleanConfig("yellow_filter_apply_globally", siteDisabled));
+        return applyGlobally ? siteDisabled : localDisabled;
+    }
+
+    private List<Map<String, Object>> filterYellowContent(List<Map<String, Object>> results, boolean disabled) {
+        if (disabled) {
             return results;
         }
         return results.stream()
@@ -301,8 +305,8 @@ public class SearchService {
         return results;
     }
 
-    List<Map<String, Object>> filterSearchResults(List<Map<String, Object>> results, String keyword) {
-        return filterYellowContent(filterIrrelevantContent(results, keyword));
+    List<Map<String, Object>> filterSearchResults(List<Map<String, Object>> results, String keyword, boolean yellowFilterDisabled) {
+        return filterYellowContent(filterIrrelevantContent(results, keyword), yellowFilterDisabled);
     }
 
     // 每一页到达后立即交付，不让后续页阻塞首批结果。

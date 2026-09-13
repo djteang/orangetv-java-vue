@@ -33,6 +33,10 @@ public class AdminSiteController {
             siteConfigService.setConfig("disable_yellow_filter",
                     String.valueOf(request.get("DisableYellowFilter")), "boolean", null);
         }
+        if (request.containsKey("YellowFilterApplyGlobally")) {
+            siteConfigService.setConfig("yellow_filter_apply_globally",
+                    String.valueOf(request.get("YellowFilterApplyGlobally")), "boolean", null);
+        }
         if (request.containsKey("FluidSearch")) {
             siteConfigService.setConfig("fluid_search",
                     String.valueOf(request.get("FluidSearch")), "boolean", null);

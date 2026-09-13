@@ -43,6 +43,12 @@ public class ServerConfigController {
         config.putIfAbsent("allow_registration", allowRegistration);
         config.putIfAbsent("allowRegistration", config.get("allow_registration"));
         config.put("storageType", "mysql");
+        boolean disableYellowFilter = Boolean.TRUE.equals(siteConfigService.getBooleanConfig("disable_yellow_filter", false));
+        config.put("disableYellowFilter", disableYellowFilter);
+        config.put("disable_yellow_filter", disableYellowFilter);
+        boolean yellowFilterApplyGlobally = Boolean.TRUE.equals(siteConfigService.getBooleanConfig("yellow_filter_apply_globally", disableYellowFilter));
+        config.put("yellowFilterApplyGlobally", yellowFilterApplyGlobally);
+        config.put("yellow_filter_apply_globally", yellowFilterApplyGlobally);
 
         // 检查是否配置了 LinuxDo OAuth（需要同时满足：站点配置启用 + 配置了 client-id）
         Boolean enableLinuxDoLogin = siteConfigService.getBooleanConfig("enable_linuxdo_login", false);

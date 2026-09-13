@@ -24,25 +24,30 @@ public class SearchController {
 
     @GetMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     @SkipWrapper
-    public ResponseEntity<SseEmitter> searchStream(@RequestParam String q) {
+    public ResponseEntity<SseEmitter> searchStream(
+            @RequestParam String q,
+            @RequestParam(defaultValue = "false") boolean disableYellowFilter) {
         if (q.isBlank() || q.length() > 200) throw ApiException.badRequest("请输入有效的搜索关键词");
         return ResponseEntity.ok().cacheControl(CacheControl.noStore())
                 .header("X-Accel-Buffering", "no")
-                .body(searchStreamService.search(q.trim()));
+                .body(searchStreamService.search(q.trim(), disableYellowFilter));
     }
 
     @GetMapping
-    public ResponseEntity<Map<String, Object>> search(@RequestParam String q) {
-        Map<String, Object> results = searchService.search(q);
-        return ResponseEntity.ok(results);
+    public ResponseEntity<Map<String, Object>> search(
+            @RequestParam String q,
+            @RequestParam(defaultValue = "false") boolean disableYellowFilter) {
+        Map<String, Object> results = searchService.search(q, disableYellowFilter);
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(results);
     }
 
     @GetMapping("/one")
     public ResponseEntity<Map<String, Object>> searchOne(
             @RequestParam String q,
-            @RequestParam String resourceId) {
-        Map<String, Object> results = searchService.searchOne(q, resourceId);
-        return ResponseEntity.ok(results);
+            @RequestParam String resourceId,
+            @RequestParam(defaultValue = "false") boolean disableYellowFilter) {
+        Map<String, Object> results = searchService.searchOne(q, resourceId, disableYellowFilter);
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(results);
     }
 
     @GetMapping("/resources")

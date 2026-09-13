@@ -7,7 +7,7 @@ import { useUserStore } from '@/stores/user'
 import { useToast } from '@/composables/useToast'
 import { getVideoDetail, getVideoPlayUrl, search } from '@/api/search'
 import type { SearchResult } from '@/types'
-import { Heart, Users, Check, X, Share2, UserPlus, Link } from 'lucide-vue-next'
+import { Heart, Users, Check, X, Share2, UserPlus, Link, AlertTriangle } from 'lucide-vue-next'
 import { useAuthStore } from '@/stores/auth'
 import { useSiteStore } from '@/stores/site'
 import request from '@/api/index'
@@ -41,6 +41,8 @@ const videoCover = ref('')
 
 // 折叠选集面板
 const isEpisodeSelectorCollapsed = ref(false)
+const episodeSelectorRef = ref<InstanceType<typeof EpisodeSelector> | null>(null)
+const episodeSelectorPanelRef = ref<HTMLDivElement | null>(null)
 
 // 视频加载蒙层
 const isVideoLoading = ref(true)
@@ -57,6 +59,24 @@ const pendingSeekTime = ref(0)
 const availableSources = ref<SearchResult[]>([])
 const sourceSearchLoading = ref(false)
 const sourceSearchError = ref<string | null>(null)
+const sourceTestError = ref<string | null>(null)
+const playbackError = ref<string | null>(null)
+const sourceWarning = computed(() => playbackError.value || (sourceTestError.value
+  ? `当前播放源检测异常：${sourceTestError.value}。如无法播放，请手动切换其他源。`
+  : ''))
+let sourceChangeRequest = 0
+
+function reportPlaybackFailure(message: string) {
+  playbackError.value = message
+  isVideoLoading.value = false
+}
+
+async function showSourceSelector() {
+  isEpisodeSelectorCollapsed.value = false
+  await nextTick()
+  await episodeSelectorRef.value?.showSources()
+  episodeSelectorPanelRef.value?.scrollIntoView({ block: 'nearest' })
+}
 
 // 共同观影
 const showInviteModal = ref(false)
@@ -275,6 +295,21 @@ const actualId = ref('')
 
 const totalEpisodes = computed(() => videoDetail.value?.episodes?.length || 0)
 
+// 搜索结果可能尚未包含当前源，用已加载的详情补齐并供优先测速使用。
+const selectorSources = computed(() => {
+  if (!videoDetail.value || !actualSource.value || !actualId.value) return availableSources.value
+  const current = { ...videoDetail.value, source: actualSource.value, id: actualId.value }
+  const includesCurrent = availableSources.value.some(item => item.source === current.source && item.id === current.id)
+  return includesCurrent
+    ? availableSources.value.map(item => item.source === current.source && item.id === current.id ? { ...item, ...current } : item)
+    : [current, ...availableSources.value]
+})
+
+watch([actualSource, actualId], () => {
+  sourceTestError.value = null
+  playbackError.value = null
+}, { flush: 'sync' })
+
 const isFavorite = computed(() => {
   if (!actualSource.value || !actualId.value) return false
   return userStore.isFavorite(`${actualSource.value}+${actualId.value}`)
@@ -305,6 +340,7 @@ function extractSearchResults(raw: any): SearchResult[] {
 }
 
 async function fetchVideoDetail() {
+  ++sourceChangeRequest
   const hasSourceId = source.value && videoId.value
   const hasTitle = titleParam.value
   const hasSources = sourcesParam.value
@@ -503,7 +539,11 @@ async function searchAvailableSources() {
 
 async function fetchPlayUrl() {
   if (!actualSource.value || !actualId.value) return
-  if (!videoDetail.value?.episodes?.length) return
+  if (!videoDetail.value?.episodes?.some(Boolean)) {
+    playUrl.value = ''
+    reportPlaybackFailure('当前播放源暂无播放地址，请手动切换其他源。')
+    return
+  }
 
   // 直接从已有的 episodes 数组取 URL
   const url = videoDetail.value.episodes[currentEpisode.value]
@@ -532,20 +572,25 @@ async function fetchPlayUrl() {
         await nextTick()
         initPlayer()
       }
+    } else {
+      reportPlaybackFailure('当前播放源暂无播放地址，请手动切换其他源。')
     }
   } catch (err) {
     console.error('获取播放地址失败:', err)
-    toast.error('获取播放地址失败')
+    reportPlaybackFailure('获取播放地址失败，请手动切换其他源。')
   }
 }
 
 function initPlayer() {
   if (!playerRef.value || !playUrl.value) return
+  playbackError.value = null
 
   // 如果已有播放器实例，用 switch 切换，并重新加载弹幕
   if (artInstance.value) {
-    artInstance.value.switchUrl(playUrl.value)
-    isVideoLoading.value = false
+    const requestedUrl = playUrl.value
+    void artInstance.value.switchUrl(requestedUrl).catch(() => {
+      if (playUrl.value === requestedUrl) reportPlaybackFailure('当前播放源连接失败，请手动切换其他源。')
+    })
     // 切换视频后重新加载弹幕
     if (enableDanmaku.value && artInstance.value.plugins?.artplayerPluginDanmuku) {
       (artInstance.value.plugins.artplayerPluginDanmuku as any).load()
@@ -607,11 +652,18 @@ function initPlayer() {
             ;(video as any).hls.destroy()
           }
           const hls = new Hls()
+          hls.on(Hls.Events.ERROR, (_event, data) => {
+            if (data.fatal && playUrl.value === url) {
+              reportPlaybackFailure('当前播放源连接失败或不支持播放，请手动切换其他源。')
+            }
+          })
           hls.loadSource(url)
           hls.attachMedia(video)
           ;(video as any).hls = hls
         } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
           video.src = url
+        } else {
+          reportPlaybackFailure('当前浏览器不支持此播放源，请手动切换其他源。')
         }
       },
     },
@@ -635,8 +687,19 @@ function initPlayer() {
     }
   })
 
-  artInstance.value.on('video:playing', () => {
+  artInstance.value.on('video:canplay', () => {
+    playbackError.value = null
     isVideoLoading.value = false
+  })
+
+  artInstance.value.on('video:playing', () => {
+    playbackError.value = null
+    isVideoLoading.value = false
+  })
+
+  artInstance.value.on('video:error', () => {
+    const code = artInstance.value?.video.error?.code
+    if (code && code !== 1) reportPlaybackFailure('当前播放源连接失败或不支持播放，请手动切换其他源。')
   })
 }
 
@@ -678,44 +741,43 @@ function handleEpisodeChange(episodeNumber: number) {
   }
 }
 
-function handleSourceChange(newSource: string, newId: string, newTitle: string) {
+async function handleSourceChange(newSource: string, newId: string, newTitle: string) {
+  const requested = selectorSources.value.find(item => item.source === newSource && item.id === newId)
+  if (!requested) return
+  const requestId = ++sourceChangeRequest
+  const previousEpisode = currentEpisode.value
+  savePlayRecord()
   isVideoLoading.value = true
   videoLoadingStage.value = 'sourceChanging'
+  playbackError.value = null
 
-  const newDetail = availableSources.value.find(
-    (s) => s.source === newSource && s.id === newId
-  )
-  if (!newDetail) {
-    isVideoLoading.value = false
-    return
+  try {
+    // 聚合列表可能只有来源名称和 ID，手动切换时先补齐剧集地址。
+    const newDetail = requested.episodes?.some(Boolean)
+      ? requested
+      : extractDetail(await getVideoDetail(newSource, newId))
+    if (requestId !== sourceChangeRequest) return
+    if (!newDetail?.episodes?.some(Boolean)) throw new Error('暂无播放地址')
+
+    skipNextWatch.value = true
+    void router.replace({
+      path: '/play',
+      query: { ...route.query, source: newSource, id: newId },
+    })
+
+    videoTitle.value = newDetail.title || newTitle
+    videoYear.value = newDetail.year
+    videoCover.value = newDetail.poster
+    actualSource.value = newSource
+    actualId.value = newId
+    videoDetail.value = newDetail
+    currentEpisode.value = previousEpisode < newDetail.episodes.length ? previousEpisode : 0
+    await fetchPlayUrl()
+  } catch (err) {
+    if (requestId !== sourceChangeRequest) return
+    console.error('切换播放源失败:', err)
+    reportPlaybackFailure(`切换到“${requested.source_name || newSource}”失败，请手动选择其他源。`)
   }
-
-  // 尝试保持当前集数
-  let targetIndex = currentEpisode.value
-  if (!newDetail.episodes || targetIndex >= newDetail.episodes.length) {
-    targetIndex = 0
-  }
-
-  // 更新 URL
-  skipNextWatch.value = true
-  router.replace({
-    path: '/play',
-    query: {
-      ...route.query,
-      source: newSource,
-      id: newId,
-    },
-  })
-
-  videoTitle.value = newDetail.title || newTitle
-  videoYear.value = newDetail.year
-  videoCover.value = newDetail.poster
-  actualSource.value = newSource
-  actualId.value = newId
-  videoDetail.value = newDetail
-  currentEpisode.value = targetIndex
-
-  fetchPlayUrl()
 }
 
 async function toggleFavorite() {
@@ -796,6 +858,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  ++sourceChangeRequest
   document.removeEventListener('keydown', handleKeyboardShortcuts)
   if (artInstance.value) {
     savePlayRecord()
@@ -831,22 +894,14 @@ watch(loading, async (newVal, oldVal) => {
   }
 })
 
-// 安全兜底：如果 isVideoLoading 超过 8 秒还没消失，强制关闭
-watch(isVideoLoading, (val) => {
-  if (val) {
-    const timer = setTimeout(() => {
-      if (isVideoLoading.value) {
-        isVideoLoading.value = false
-      }
-    }, 8000)
-    const stop = watch(isVideoLoading, (v) => {
-      if (!v) {
-        clearTimeout(timer)
-        stop()
-      }
-    })
-  }
-})
+// 首次加载和换源都设置超时提醒；切换地址或离开页面时清理旧计时器。
+watch([isVideoLoading, loading, playUrl, actualSource, actualId], ([waiting, pageLoading, url], _previous, onCleanup) => {
+  if (!waiting || pageLoading || !url) return
+  const timer = setTimeout(() => {
+    reportPlaybackFailure('当前播放源加载超时，请手动切换其他源。')
+  }, 8000)
+  onCleanup(() => clearTimeout(timer))
+}, { immediate: true })
 </script>
 
 <template>
@@ -1009,6 +1064,17 @@ watch(isVideoLoading, (val) => {
             </h1>
           </div>
 
+          <div v-if="sourceWarning" class="source-switch-notice flex flex-col gap-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200 sm:flex-row sm:items-center" role="alert">
+            <div class="flex min-w-0 flex-1 items-start gap-2">
+              <AlertTriangle :size="20" class="mt-0.5 flex-shrink-0" aria-hidden="true" />
+              <div class="min-w-0">
+                <p class="text-sm font-semibold">播放源提示</p>
+                <p class="mt-1 break-words text-sm leading-relaxed">{{ sourceWarning }}</p>
+              </div>
+            </div>
+            <button type="button" class="min-h-11 flex-shrink-0 rounded-lg border border-amber-400 px-4 py-2 text-sm font-medium hover:bg-amber-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-600 dark:border-amber-600 dark:hover:bg-amber-900/50" @click="showSourceSelector">手动切换源</button>
+          </div>
+
           <!-- 第二行：播放器和选集 -->
           <div class="space-y-2">
             <!-- 折叠控制 - 仅在 lg 及以上屏幕显示 -->
@@ -1110,6 +1176,7 @@ watch(isVideoLoading, (val) => {
 
               <!-- 选集和换源面板 -->
               <div
+                ref="episodeSelectorPanelRef"
                 :class="[
                   'h-[300px] lg:h-full md:overflow-hidden transition-all duration-300 ease-in-out',
                   isEpisodeSelectorCollapsed
@@ -1118,17 +1185,19 @@ watch(isVideoLoading, (val) => {
                 ]"
               >
                 <EpisodeSelector
+                  ref="episodeSelectorRef"
                   :total-episodes="totalEpisodes"
                   :episodes-titles="videoDetail.episodes_titles || []"
                   :model-value="currentEpisode + 1"
                   :current-source="actualSource"
                   :current-id="actualId"
                   :video-title="videoTitle"
-                  :available-sources="availableSources"
+                  :available-sources="selectorSources"
                   :source-search-loading="sourceSearchLoading"
                   :source-search-error="sourceSearchError"
                   @update:model-value="handleEpisodeChange"
                   @source-change="handleSourceChange"
+                  @current-source-error="sourceTestError = $event"
                 />
               </div>
             </div>

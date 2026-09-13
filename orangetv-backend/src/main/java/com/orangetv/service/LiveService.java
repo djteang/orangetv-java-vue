@@ -2,6 +2,11 @@ package com.orangetv.service;
 
 import com.orangetv.entity.LiveSource;
 import com.orangetv.repository.LiveSourceRepository;
+import com.orangetv.util.ContentDecoder;
+import com.orangetv.util.LivePlaylistParser;
+import com.orangetv.util.LiveHeaders;
+import org.springframework.web.client.ResourceAccessException;
+import org.springframework.web.client.HttpStatusCodeException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.cache.annotation.Cacheable;
@@ -13,6 +18,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.client.RestTemplate;
 
+import java.net.URI;
 import java.util.*;
 
 @Slf4j
@@ -42,6 +48,8 @@ public class LiveService {
             item.put("url", source.getUrl());
             item.put("epg", source.getEpgUrl());
             item.put("ua", source.getUserAgent());
+            item.put("headers", LiveHeaders.read(source.getRequestHeaders()));
+            item.put("inline", source.getChannelConfig() != null);
             item.put("channelCount", source.getChannelCount());
             result.add(item);
         }
@@ -83,14 +91,18 @@ public class LiveService {
             try {
                 String userAgent = source.getUserAgent() != null ? source.getUserAgent() : DEFAULT_USER_AGENT;
                 HttpHeaders headers = new HttpHeaders();
+                headers.setAll(LiveHeaders.read(source.getRequestHeaders()));
                 headers.set("User-Agent", userAgent);
                 HttpEntity<Void> entity = new HttpEntity<>(headers);
 
-                ResponseEntity<String> response = restTemplate.exchange(
-                        source.getUrl(), HttpMethod.GET, entity, String.class);
-                String m3uContent = response.getBody();
+                String m3uContent = source.getChannelConfig();
+                if (m3uContent == null) {
+                    ResponseEntity<String> response = restTemplate.exchange(
+                            URI.create(source.getUrl()), HttpMethod.GET, entity, String.class);
+                    m3uContent = response.getBody();
+                }
 
-                List<Map<String, Object>> channels = parseM3u(source.getSourceKey(), m3uContent);
+                List<Map<String, Object>> channels = parsePlaylist(source.getSourceKey(), m3uContent);
 
                 // 按 group 分组
                 for (Map<String, Object> channel : channels) {
@@ -123,8 +135,8 @@ public class LiveService {
         cacheTimestamp = 0;
     }
 
-    @Cacheable(value = "live", key = "'channels_' + #sourceKey")
-    @Transactional(readOnly = true)
+    @Cacheable(value = "live", key = "'channels_' + #sourceKey", unless = "#result.containsKey('error')")
+    @Transactional
     public Map<String, Object> getChannels(String sourceKey) {
         LiveSource source = liveSourceRepository.findBySourceKey(sourceKey)
                 .orElse(null);
@@ -137,14 +149,25 @@ public class LiveService {
             // 使用自定义 UA 获取 M3U 内容
             String userAgent = source.getUserAgent() != null ? source.getUserAgent() : DEFAULT_USER_AGENT;
             HttpHeaders headers = new HttpHeaders();
+            headers.setAll(LiveHeaders.read(source.getRequestHeaders()));
             headers.set("User-Agent", userAgent);
             HttpEntity<Void> entity = new HttpEntity<>(headers);
 
-            ResponseEntity<String> response = restTemplate.exchange(
-                    source.getUrl(), HttpMethod.GET, entity, String.class);
-            String m3uContent = response.getBody();
+            String m3uContent = source.getChannelConfig();
+            if (m3uContent == null) {
+                ResponseEntity<String> response = restTemplate.exchange(
+                        URI.create(source.getUrl()), HttpMethod.GET, entity, String.class);
+                m3uContent = response.getBody();
+            }
 
-            List<Map<String, Object>> channels = parseM3u(sourceKey, m3uContent);
+            List<Map<String, Object>> channels = parsePlaylist(sourceKey, m3uContent);
+            if (channels.isEmpty()) {
+                return Map.of("error", "直播源中未识别到频道，请检查是否为 M3U、TXT 或 JSON 频道列表", "channels", channels);
+            }
+            if (!Objects.equals(source.getChannelCount(), channels.size())) {
+                source.setChannelCount(channels.size());
+                liveSourceRepository.save(source);
+            }
 
             return Map.of(
                     "source", source.getName(),
@@ -153,11 +176,16 @@ public class LiveService {
             );
         } catch (Exception e) {
             log.error("Failed to fetch channels from source: {}", source.getName(), e);
-            return Map.of("error", e.getMessage(), "channels", Collections.emptyList());
+            String message = e instanceof ResourceAccessException
+                    ? "服务器无法连接直播源，请检查源地址及服务器的 IPv4/IPv6 网络。"
+                    : e instanceof HttpStatusCodeException http
+                        ? "直播源返回 HTTP " + http.getStatusCode().value() + "，请检查地址和请求头是否有效。"
+                        : "直播源内容无法解析：" + Objects.toString(e.getMessage(), "未知错误");
+            return Map.of("error", message, "channels", Collections.emptyList());
         }
     }
 
-    @Cacheable(value = "epg", key = "'epg_' + #sourceKey")
+    @Cacheable(value = "epg", key = "'epg_' + #sourceKey", unless = "#result.containsKey('error')")
     @Transactional(readOnly = true)
     public Map<String, Object> getEpg(String sourceKey) {
         LiveSource source = liveSourceRepository.findBySourceKey(sourceKey)
@@ -168,14 +196,16 @@ public class LiveService {
         }
 
         try {
-            // 使用自定义 UA 获取 EPG 内容
+            // EPG 可能由另一个站点提供，不能携带直播站点的 Cookie / Authorization。
             String userAgent = source.getUserAgent() != null ? source.getUserAgent() : DEFAULT_USER_AGENT;
             HttpHeaders headers = new HttpHeaders();
+            headers.setAll(LiveHeaders.forUrl(LiveHeaders.read(source.getRequestHeaders()),
+                    URI.create(source.getUrl()), URI.create(source.getEpgUrl())));
             headers.set("User-Agent", userAgent);
             HttpEntity<Void> entity = new HttpEntity<>(headers);
 
             ResponseEntity<String> response = restTemplate.exchange(
-                    source.getEpgUrl(), HttpMethod.GET, entity, String.class);
+                    URI.create(source.getEpgUrl()), HttpMethod.GET, entity, String.class);
             String epgContent = response.getBody();
 
             return Map.of("source", source.getName(), "epg", epgContent);
@@ -187,70 +217,14 @@ public class LiveService {
 
     public Map<String, Object> precheck(String url) {
         try {
-            restTemplate.headForHeaders(url);
+            restTemplate.headForHeaders(URI.create(url));
             return Map.of("ok", true, "url", url);
         } catch (Exception e) {
             return Map.of("ok", false, "error", e.getMessage());
         }
     }
 
-    private List<Map<String, Object>> parseM3u(String sourceKey, String content) {
-        List<Map<String, Object>> channels = new ArrayList<>();
-        if (content == null || content.isEmpty()) {
-            return channels;
-        }
-
-        String[] lines = content.split("\n");
-        String currentName = null;
-        String currentLogo = null;
-        String currentGroup = null;
-        String currentTvgId = null;
-        int channelIndex = 0;
-
-        for (int i = 0; i < lines.length; i++) {
-            String line = lines[i].trim();
-            if (line.startsWith("#EXTINF:")) {
-                // 解析频道信息
-                currentTvgId = extractAttribute(line, "tvg-id");
-                currentName = extractAttribute(line, "tvg-name");
-                if (currentName == null || currentName.isEmpty()) {
-                    int commaIndex = line.lastIndexOf(',');
-                    if (commaIndex > 0) {
-                        currentName = line.substring(commaIndex + 1).trim();
-                    }
-                }
-                currentLogo = extractAttribute(line, "tvg-logo");
-                currentGroup = extractAttribute(line, "group-title");
-                if (currentGroup == null || currentGroup.isEmpty()) {
-                    currentGroup = "无分组";
-                }
-            } else if (!line.isEmpty() && !line.startsWith("#") && currentName != null) {
-                Map<String, Object> channel = new HashMap<>();
-                channel.put("id", sourceKey + "-" + channelIndex);
-                channel.put("tvgId", currentTvgId);
-                channel.put("name", currentName);
-                channel.put("url", line);
-                channel.put("logo", currentLogo);
-                channel.put("group", currentGroup);
-                channels.add(channel);
-                channelIndex++;
-                currentName = null;
-                currentLogo = null;
-                currentGroup = null;
-                currentTvgId = null;
-            }
-        }
-
-        return channels;
-    }
-
-    private String extractAttribute(String line, String attr) {
-        String pattern = attr + "=\"";
-        int start = line.indexOf(pattern);
-        if (start < 0) return null;
-        start += pattern.length();
-        int end = line.indexOf("\"", start);
-        if (end < 0) return null;
-        return line.substring(start, end);
+    private List<Map<String, Object>> parsePlaylist(String sourceKey, String content) {
+        return LivePlaylistParser.parse(sourceKey, ContentDecoder.tryDecode(content));
     }
 }

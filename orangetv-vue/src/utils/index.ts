@@ -1,5 +1,6 @@
 import { clsx, type ClassValue } from 'clsx'
 import { twMerge } from 'tailwind-merge'
+import { APP_TIME_ZONE } from './datetime'
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
@@ -27,7 +28,7 @@ export function formatDate(timestamp: number): string {
   const days = Math.floor(hours / 24)
 
   if (days > 7) {
-    return date.toLocaleDateString('zh-CN')
+    return date.toLocaleDateString('zh-CN', { timeZone: APP_TIME_ZONE })
   } else if (days > 0) {
     return `${days}天前`
   } else if (hours > 0) {

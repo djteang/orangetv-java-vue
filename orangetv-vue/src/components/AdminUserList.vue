@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { computed, ref, useId, watch } from 'vue'
 import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Search } from 'lucide-vue-next'
+import { formatDateTime } from '@/utils/datetime'
 import type { User } from '@/types'
 import { usePagination } from '@/composables/usePagination'
 import AdminUserActions from './AdminUserActions.vue'
 import AdminUserHistoryDialog from './AdminUserHistoryDialog.vue'
+import ThemeSelect from './ThemeSelect.vue'
 
 const props = defineProps<{
   users: User[]
@@ -24,6 +26,7 @@ const emit = defineEmits<{
 
 const selectedHistoryUser = ref<User | null>(null)
 const fieldId = useId()
+const pageSizeOptions = [10, 20, 50].map(value => ({ value, label: `${value} 条` }))
 const searchTerm = ref('')
 const query = computed(() => searchTerm.value.trim().toLocaleLowerCase())
 const filteredUsers = computed(() => props.users.filter(user => user.username.toLocaleLowerCase().includes(query.value)))
@@ -65,7 +68,7 @@ function statusClass(banned: boolean) {
 }
 
 function formatDate(value?: string) {
-  return value ? new Date(value).toLocaleString('zh-CN') : '从未登录'
+  return value ? formatDateTime(value) : '从未登录'
 }
 </script>
 
@@ -80,11 +83,7 @@ function formatDate(value?: string) {
       <div class="flex shrink-0 items-center gap-2 text-sm text-theme-text-secondary">
         <span v-if="refreshing" role="status" class="mr-auto">更新中...</span>
         <label :for="`user-page-size-${fieldId}`">每页</label>
-        <select :id="`user-page-size-${fieldId}`" v-model.number="pageSize" :disabled="refreshing" class="h-10 rounded-lg border border-theme-border bg-theme-surface py-1 pl-3 pr-8 text-sm text-theme-text focus:border-blue-500 focus:ring-blue-500 disabled:opacity-50">
-          <option :value="10">10 条</option>
-          <option :value="20">20 条</option>
-          <option :value="50">50 条</option>
-        </select>
+        <ThemeSelect :id="`user-page-size-${fieldId}`" v-model="pageSize" :options="pageSizeOptions" label="每页用户数量" :disabled="refreshing" class="w-24" />
       </div>
     </div>
 
@@ -115,7 +114,7 @@ function formatDate(value?: string) {
               <td class="px-2 py-3"><span :class="['inline-flex whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium', statusClass(user.banned)]">{{ user.banned ? '已封禁' : '正常' }}</span></td>
               <td class="px-2 py-3">
                 <div v-if="user.machineCodes?.length" class="space-y-1 text-xs">
-                  <div v-for="(device, index) in user.machineCodes.slice(0, 2)" :key="index" class="break-all font-mono text-theme-text" :title="`设备码: ${device.machineCode}\n设备名称: ${device.deviceName || '未设置'}\n创建时间: ${new Date(device.createdAt).toLocaleString('zh-CN')}\n最后使用: ${device.lastUsedAt ? new Date(device.lastUsedAt).toLocaleString('zh-CN') : '未使用'}`">{{ device.machineCode.substring(0, 16) }}...</div>
+                  <div v-for="(device, index) in user.machineCodes.slice(0, 2)" :key="index" class="break-all font-mono text-theme-text" :title="`设备码: ${device.machineCode}\n设备名称: ${device.deviceName || '未设置'}\n创建时间: ${formatDateTime(device.createdAt)}\n最后使用: ${device.lastUsedAt ? formatDateTime(device.lastUsedAt) : '未使用'}`">{{ device.machineCode.substring(0, 16) }}...</div>
                   <span v-if="user.machineCodes.length > 2" class="text-theme-text-secondary" :title="user.machineCodes.slice(2).map(device => `${device.machineCode} (${device.deviceName || '未命名'})`).join('\n')">+{{ user.machineCodes.length - 2 }} 更多</span>
                 </div>
                 <span v-else class="text-xs text-theme-text-secondary">未绑定</span>
@@ -160,7 +159,7 @@ function formatDate(value?: string) {
                 <li v-for="(device, index) in user.machineCodes" :key="index" class="min-w-0 rounded-lg bg-gray-100 p-2 dark:bg-gray-700">
                   <p class="break-all font-medium text-theme-text">{{ device.deviceName || `设备 ${index + 1}` }}</p>
                   <p class="mt-1 break-all font-mono text-theme-text-secondary">{{ device.machineCode }}</p>
-                  <p class="mt-1 text-theme-text-secondary">最后使用：{{ device.lastUsedAt ? new Date(device.lastUsedAt).toLocaleString('zh-CN') : '未使用' }}</p>
+                  <p class="mt-1 text-theme-text-secondary">最后使用：{{ device.lastUsedAt ? formatDateTime(device.lastUsedAt) : '未使用' }}</p>
                 </li>
               </ul>
             </details>

@@ -4,6 +4,7 @@ import com.orangetv.dto.user.PlayRecordDto;
 import com.orangetv.dto.user.SavePlayRecordRequest;
 import com.orangetv.entity.PlayRecord;
 import com.orangetv.entity.User;
+import com.orangetv.util.AppTime;
 import com.orangetv.exception.ApiException;
 import com.orangetv.repository.PlayRecordRepository;
 import com.orangetv.repository.UserRepository;
@@ -12,7 +13,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.ZoneOffset;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -120,8 +120,7 @@ public class PlayRecordService {
                 .year(record.getYear())
                 .totalEpisodes(record.getTotalEpisodes())
                 .searchTitle(record.getSearchTitle())
-                .saveTime(record.getUpdatedAt() != null ?
-                        record.getUpdatedAt().toEpochSecond(ZoneOffset.UTC) * 1000 : null)
+                .saveTime(AppTime.toEpochMillis(record.getUpdatedAt()))
                 .build();
     }
 }

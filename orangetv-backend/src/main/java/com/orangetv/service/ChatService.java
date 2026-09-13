@@ -12,9 +12,7 @@ import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.LocalDateTime;
-import java.time.ZoneId;
-import java.time.ZoneOffset;
+import com.orangetv.util.AppTime;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -121,7 +119,7 @@ public class ChatService {
         messageRepository.save(message);
 
         // 更新对话时间
-        conversation.setUpdatedAt(LocalDateTime.now());
+        conversation.setUpdatedAt(AppTime.now());
         conversationRepository.save(conversation);
 
         ChatMessageDto dto = toMessageDto(message);
@@ -187,8 +185,8 @@ public class ChatService {
             map.put("message", r.getMessage());
             map.put("status", r.getStatus());
             map.put("direction", "received"); // 收到的申请
-            map.put("created_at", r.getCreatedAt().toEpochSecond(ZoneOffset.UTC) * 1000);
-            map.put("updated_at", r.getUpdatedAt() != null ? r.getUpdatedAt().toEpochSecond(ZoneOffset.UTC) * 1000 : null);
+            map.put("created_at", AppTime.toEpochMillis(r.getCreatedAt()));
+            map.put("updated_at", AppTime.toEpochMillis(r.getUpdatedAt()));
             result.add(map);
         }
 
@@ -203,8 +201,8 @@ public class ChatService {
             map.put("message", r.getMessage());
             map.put("status", r.getStatus());
             map.put("direction", "sent"); // 发出的申请
-            map.put("created_at", r.getCreatedAt().toEpochSecond(ZoneOffset.UTC) * 1000);
-            map.put("updated_at", r.getUpdatedAt() != null ? r.getUpdatedAt().toEpochSecond(ZoneOffset.UTC) * 1000 : null);
+            map.put("created_at", AppTime.toEpochMillis(r.getCreatedAt()));
+            map.put("updated_at", AppTime.toEpochMillis(r.getUpdatedAt()));
             result.add(map);
         }
 
@@ -303,9 +301,6 @@ public class ChatService {
                 .collect(Collectors.toList());
     }
 
-    // China timezone offset (UTC+8)
-    private static final ZoneOffset CHINA_ZONE = ZoneOffset.ofHours(8);
-
     private ConversationDto toConversationDto(Conversation conversation) {
         List<String> participants = participantRepository.findByConversationId(conversation.getId())
                 .stream()
@@ -318,10 +313,8 @@ public class ChatService {
                 .type(conversation.getType())
                 .participants(participants)
                 .isGroup("group".equals(conversation.getType()))
-                .createdAt(conversation.getCreatedAt() != null ?
-                        conversation.getCreatedAt().toEpochSecond(CHINA_ZONE) * 1000 : null)
-                .updatedAt(conversation.getUpdatedAt() != null ?
-                        conversation.getUpdatedAt().toEpochSecond(CHINA_ZONE) * 1000 : null)
+                .createdAt(AppTime.toEpochMillis(conversation.getCreatedAt()))
+                .updatedAt(AppTime.toEpochMillis(conversation.getUpdatedAt()))
                 .build();
     }
 
@@ -334,8 +327,7 @@ public class ChatService {
                 .content(message.getContent())
                 .messageType(message.getMessageType())
                 .voiceDuration(message.getVoiceDuration())
-                .timestamp(message.getCreatedAt() != null ?
-                        message.getCreatedAt().toEpochSecond(CHINA_ZONE) * 1000 : null)
+                .timestamp(AppTime.toEpochMillis(message.getCreatedAt()))
                 .isRead(false)
                 .build();
     }

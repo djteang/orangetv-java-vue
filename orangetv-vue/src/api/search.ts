@@ -1,17 +1,19 @@
 import request from './index'
 import type { SearchResult } from '@/types'
 import { createServerEventParser } from '@/utils/serverEvents'
+import { readDisableYellowFilter } from '@/utils/yellowFilter'
 
 export interface SearchParams {
   q: string
   source?: string
   page?: number
   pageSize?: number
+  disableYellowFilter?: boolean
 }
 
 // search 返回 { results: SearchResult[] }，拦截器解包后得到该对象
 export function search(params: SearchParams, signal?: AbortSignal): Promise<{ results: SearchResult[] }> {
-  return request.get('/search', { params, signal })
+  return request.get('/search', { params: { ...params, disableYellowFilter: params.disableYellowFilter ?? readDisableYellowFilter() }, signal })
 }
 
 export interface SearchProgress {
@@ -22,15 +24,16 @@ export interface SearchProgress {
 }
 
 export interface SearchStreamOptions {
+  disableYellowFilter?: boolean
   signal: AbortSignal
   onResults: (results: SearchResult[]) => void
   onProgress: (progress: SearchProgress) => void
 }
 
 export async function streamSearch(query: string, options: SearchStreamOptions): Promise<SearchProgress> {
-  const { signal, onResults, onProgress } = options
+  const { signal, onResults, onProgress, disableYellowFilter = readDisableYellowFilter() } = options
   const fallback = async () => {
-    const response = await search({ q: query }, signal)
+    const response = await search({ q: query, disableYellowFilter }, signal)
     onResults(Array.isArray(response) ? response : response.results || [])
     const summary = { totalSources: 1, completedSources: 1, failedSources: 0, timedOut: false }
     onProgress(summary)
@@ -44,7 +47,7 @@ export async function streamSearch(query: string, options: SearchStreamOptions):
   const base = (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/$/, '')
   let response: Response
   try {
-    response = await fetch(`${base}/search/stream?${new URLSearchParams({ q: query })}`, {
+    response = await fetch(`${base}/search/stream?${new URLSearchParams({ q: query, disableYellowFilter: String(disableYellowFilter) })}`, {
       signal,
       headers: { Accept: 'text/event-stream', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       credentials: 'same-origin',

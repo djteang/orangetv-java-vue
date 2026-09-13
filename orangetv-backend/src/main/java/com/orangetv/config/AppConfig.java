@@ -19,6 +19,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.HttpComponentsClientHttpRequestFactory;
+import org.springframework.http.client.ClientHttpRequestFactory;
 import org.springframework.http.converter.ByteArrayHttpMessageConverter;
 import org.springframework.http.converter.StringHttpMessageConverter;
 import org.springframework.http.converter.json.Jackson2ObjectMapperBuilder;
@@ -27,6 +28,7 @@ import org.springframework.web.client.RestTemplate;
 
 import javax.net.ssl.SSLContext;
 import java.util.Arrays;
+import java.nio.charset.StandardCharsets;
 import java.util.concurrent.Executor;
 
 @Configuration
@@ -44,24 +46,29 @@ public class AppConfig {
     @Bean
     @Primary
     public RestTemplate restTemplate() throws Exception {
-        return createRestTemplate(false);
+        return createRestTemplate(false, false);
     }
 
     @Bean(name = "searchRestTemplate")
     public RestTemplate searchRestTemplate() throws Exception {
-        return createRestTemplate(true);
+        return createRestTemplate(true, false);
     }
 
-    private RestTemplate createRestTemplate(boolean searchClient) throws Exception {
+    @Bean(name = "liveRestTemplate")
+    public RestTemplate liveRestTemplate() throws Exception {
+        return createRestTemplate(false, true);
+    }
+
+    private RestTemplate createRestTemplate(boolean searchClient, boolean liveClient) throws Exception {
         // 构建信任所有证书的 SSL 上下文（CMS 视频源 API 常使用自签名/过期证书）
         SSLContext sslContext = SSLContextBuilder.create()
                 .loadTrustMaterial(TrustAllStrategy.INSTANCE)
                 .build();
 
-        // 搜索使用较短超时；直播等请求保留原有的 30s / 60s 超时。
+        // 搜索和连续直播流各自限制连接与读取超时。
         ConnectionConfig connectionConfig = ConnectionConfig.custom()
-                .setConnectTimeout(Timeout.ofSeconds(searchClient ? 3 : 30))
-                .setSocketTimeout(Timeout.ofSeconds(searchClient ? 8 : 60))
+                .setConnectTimeout(Timeout.ofSeconds(searchClient ? 3 : liveClient ? 5 : 30))
+                .setSocketTimeout(Timeout.ofSeconds(searchClient ? 8 : liveClient ? 15 : 60))
                 .build();
 
         // 搜索独立使用连接池，避免慢源影响直播和其他代理请求。
@@ -77,9 +84,9 @@ public class AppConfig {
 
         // 搜索也限制等待连接的时间，防止连接池拥塞时长时间排队。
         RequestConfig requestConfig = RequestConfig.custom()
-                .setResponseTimeout(Timeout.ofSeconds(searchClient ? 8 : 60))
-                .setConnectionRequestTimeout(Timeout.ofSeconds(searchClient ? 2 : 180))
-                .setRedirectsEnabled(true)
+                .setResponseTimeout(Timeout.ofSeconds(searchClient ? 8 : liveClient ? 15 : 60))
+                .setConnectionRequestTimeout(Timeout.ofSeconds(searchClient ? 2 : liveClient ? 3 : 180))
+                .setRedirectsEnabled(!liveClient)
                 .build();
 
         var clientBuilder = HttpClients.custom()
@@ -88,10 +95,11 @@ public class AppConfig {
                 .setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
                 .disableCookieManagement();
         // 慢源只尝试一次，避免自动重试占用搜索连接池。
-        if (searchClient) clientBuilder.disableAutomaticRetries();
+        if (searchClient || liveClient) clientBuilder.disableAutomaticRetries();
         CloseableHttpClient httpClient = clientBuilder.build();
 
-        HttpComponentsClientHttpRequestFactory factory = new HttpComponentsClientHttpRequestFactory(httpClient);
+        ClientHttpRequestFactory factory = liveClient ? new LiveHttpRequestFactory(httpClient)
+                : new HttpComponentsClientHttpRequestFactory(httpClient);
         RestTemplate restTemplate = new RestTemplate(factory);
 
         // 添加支持所有媒体类型的 ByteArrayHttpMessageConverter
@@ -108,7 +116,7 @@ public class AppConfig {
         restTemplate.getMessageConverters().add(0, byteArrayConverter);
 
         // 添加支持 m3u8 媒体类型的 StringHttpMessageConverter
-        StringHttpMessageConverter stringConverter = new StringHttpMessageConverter();
+        StringHttpMessageConverter stringConverter = new StringHttpMessageConverter(StandardCharsets.UTF_8);
         stringConverter.setSupportedMediaTypes(Arrays.asList(
                 MediaType.TEXT_PLAIN,
                 MediaType.TEXT_HTML,

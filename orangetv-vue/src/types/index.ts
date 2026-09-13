@@ -235,6 +235,7 @@ export interface SiteSettings {
   Announcements: SiteAnnouncement[]
   RequireDeviceCode: boolean
   DisableYellowFilter: boolean
+  YellowFilterApplyGlobally: boolean
   FluidSearch: boolean
   EnableLinuxDoLogin: boolean
   EnableDanmu: boolean
@@ -250,6 +251,7 @@ export interface SiteConfig {
   announcements?: SiteAnnouncement[]
   require_device_code?: boolean
   disable_yellow_filter?: boolean
+  yellow_filter_apply_globally?: boolean
   fluid_search?: boolean
   search_downstream_max_page?: number
   site_interface_cache_time?: number
@@ -273,9 +275,11 @@ export interface LiveSource {
   key: string
   name: string
   url: string
-  epg?: string
-  ua?: string
-  channelCount?: number
+  epg?: string | null
+  ua?: string | null
+  headers?: Record<string, string>
+  inline?: boolean
+  channelCount?: number | null
   enabled: boolean
   disabled: boolean
   from?: string

@@ -38,12 +38,22 @@ const props = withDefaults(
 const emit = defineEmits<{
   'update:modelValue': [episodeNumber: number]
   sourceChange: [source: string, id: string, title: string]
+  currentSourceError: [message: string | null]
 }>()
 
 const router = useRouter()
 
 // Tab state
 const activeTab = ref<'episodes' | 'sources'>(props.totalEpisodes > 1 ? 'episodes' : 'sources')
+const sourceTabRef = ref<HTMLButtonElement | null>(null)
+
+async function showSources() {
+  activeTab.value = 'sources'
+  await nextTick()
+  sourceTabRef.value?.focus({ preventScroll: true })
+}
+
+defineExpose({ showSources })
 
 // Pagination
 const pageCount = computed(() => Math.ceil(props.totalEpisodes / props.episodesPerPage))
@@ -251,6 +261,17 @@ function resetSpeedTests() {
 }
 
 watch(() => props.videoTitle, resetSpeedTests)
+// 当前播放源始终优先检测，包括默认停留在“选集”标签的剧集。
+watch(
+  [() => props.availableSources.find(source => source.source === props.currentSource && source.id === props.currentId), () => props.videoTitle],
+  ([source]) => { if (source) void testSource(source) },
+  { immediate: true },
+)
+watch(
+  () => videoInfoMap.get(JSON.stringify([props.currentSource, props.currentId])),
+  info => emit('currentSourceError', info?.hasError ? info.errorMessage || '测速失败' : null),
+  { immediate: true },
+)
 watch(
   [activeTab, () => props.availableSources, () => props.videoTitle],
   () => { void testPendingSources() },
@@ -313,8 +334,10 @@ function goToSearch() {
   >
     <!-- Tab bar -->
     <div class="flex mb-1 -mx-6 flex-shrink-0">
-      <div
+      <button
         v-if="totalEpisodes > 1"
+        type="button"
+        :aria-pressed="activeTab === 'episodes'"
         @click="activeTab = 'episodes'"
         :class="[
           'flex-1 py-3 px-6 text-center cursor-pointer transition-all duration-200 font-medium',
@@ -324,8 +347,11 @@ function goToSearch() {
         ]"
       >
         选集
-      </div>
-      <div
+      </button>
+      <button
+        ref="sourceTabRef"
+        type="button"
+        :aria-pressed="activeTab === 'sources'"
         @click="activeTab = 'sources'"
         :class="[
           'flex-1 py-3 px-6 text-center cursor-pointer transition-all duration-200 font-medium',
@@ -335,7 +361,7 @@ function goToSearch() {
         ]"
       >
         换源
-      </div>
+      </button>
     </div>
 
     <!-- Episodes tab -->

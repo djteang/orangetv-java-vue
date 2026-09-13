@@ -39,7 +39,7 @@ public class ProxyController {
             HttpEntity<String> entity = new HttpEntity<>(headers);
             // 使用 byte[] 获取以避免 Content-Type 不匹配问题
             ResponseEntity<byte[]> proxyResponse = restTemplate.exchange(
-                    decodedUrl, HttpMethod.GET, entity, byte[].class);
+                    URI.create(decodedUrl), HttpMethod.GET, entity, byte[].class);
 
             byte[] body = proxyResponse.getBody();
             if (body == null || body.length == 0) {
@@ -102,7 +102,7 @@ public class ProxyController {
 
             HttpEntity<String> entity = new HttpEntity<>(headers);
             ResponseEntity<byte[]> proxyResponse = restTemplate.exchange(
-                    decodedUrl, HttpMethod.GET, entity, byte[].class);
+                    URI.create(decodedUrl), HttpMethod.GET, entity, byte[].class);
 
             response.setContentType("video/mp2t");
 
@@ -142,7 +142,7 @@ public class ProxyController {
 
             HttpEntity<String> entity = new HttpEntity<>(headers);
             ResponseEntity<byte[]> proxyResponse = restTemplate.exchange(
-                    decodedUrl, HttpMethod.GET, entity, byte[].class);
+                    URI.create(decodedUrl), HttpMethod.GET, entity, byte[].class);
 
             // 设置响应头
             response.setContentType("video/mp4");
@@ -175,7 +175,7 @@ public class ProxyController {
             HttpServletResponse response) {
         try {
             String decodedUrl = decodeUrl(url);
-            ResponseEntity<byte[]> proxyResponse = restTemplate.getForEntity(decodedUrl, byte[].class);
+            ResponseEntity<byte[]> proxyResponse = restTemplate.getForEntity(URI.create(decodedUrl), byte[].class);
 
             String contentType = "image/png";
             if (decodedUrl.endsWith(".jpg") || decodedUrl.endsWith(".jpeg")) {
@@ -212,7 +212,7 @@ public class ProxyController {
 
             HttpEntity<String> entity = new HttpEntity<>(headers);
             ResponseEntity<byte[]> proxyResponse = restTemplate.exchange(
-                    decodedUrl, HttpMethod.GET, entity, byte[].class);
+                    URI.create(decodedUrl), HttpMethod.GET, entity, byte[].class);
 
             response.setContentType("application/octet-stream");
 
@@ -228,18 +228,22 @@ public class ProxyController {
     }
 
     private String decodeUrl(String url) {
-        // 优先使用 URL 解码（与参考项目保持一致）
+        // Spring 已解码查询参数，完整 URL 中的百分号转义和加号属于上游地址。
+        if (url.startsWith("http://") || url.startsWith("https://")) {
+            return url;
+        }
+
+        // 直播播放器使用 Base64 传递完整地址。
         try {
-            String decoded = URLDecoder.decode(url, StandardCharsets.UTF_8);
-            // 如果解码后是有效的 URL，则返回
+            String decoded = new String(Base64.getDecoder().decode(url), StandardCharsets.UTF_8);
             if (decoded.startsWith("http://") || decoded.startsWith("https://")) {
                 return decoded;
             }
         } catch (Exception ignored) {}
 
-        // 尝试 Base64 解码（向后兼容）
+        // 兼容仍对完整 URL 额外编码一次的旧客户端，仅解码这一层。
         try {
-            String decoded = new String(Base64.getDecoder().decode(url), StandardCharsets.UTF_8);
+            String decoded = URLDecoder.decode(url, StandardCharsets.UTF_8);
             if (decoded.startsWith("http://") || decoded.startsWith("https://")) {
                 return decoded;
             }

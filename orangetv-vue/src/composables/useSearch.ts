@@ -1,6 +1,8 @@
-import { onScopeDispose, ref, shallowRef } from 'vue'
+import { onScopeDispose, ref, shallowRef, watch } from 'vue'
 import { streamSearch, type SearchProgress } from '@/api/search'
 import type { SearchResult } from '@/types'
+import { useSiteStore } from '@/stores/site'
+import { isYellowFilterChange, readDisableYellowFilter, YELLOW_FILTER_CHANGE_EVENT } from '@/utils/yellowFilter'
 
 interface CachedSearch { results: SearchResult[]; progress: SearchProgress; expires: number }
 const recentSearches = new Map<string, CachedSearch>()
@@ -18,6 +20,7 @@ function canCache(items: SearchResult[]) {
 }
 
 export function useSearch(searcher = streamSearch) {
+  const siteStore = useSiteStore()
   const results = shallowRef<SearchResult[]>([])
   const query = ref('')
   const loading = ref(false)
@@ -66,14 +69,17 @@ export function useSearch(searcher = streamSearch) {
     let owner = ''
     try { owner = localStorage.getItem('token') || '' } catch { /* 无存储模式。 */ }
     if (owner !== cacheOwner) { recentSearches.clear(); cacheOwner = owner }
-    const cached = recentSearches.get(nextQuery)
+    const disableYellowFilter = readDisableYellowFilter()
+    const effectiveDisabled = siteStore.yellowFilterApplyGlobally ? siteStore.disableYellowFilter : disableYellowFilter
+    const cacheKey = JSON.stringify([nextQuery, effectiveDisabled])
+    const cached = recentSearches.get(cacheKey)
     if (!force && cached && cached.expires > Date.now()) {
       results.value = cached.results
       progress.value = cached.progress
       fromCache.value = true
       return
     }
-    recentSearches.delete(nextQuery)
+    recentSearches.delete(cacheKey)
     loading.value = true
     controller = new AbortController()
     const request = controller
@@ -82,6 +88,7 @@ export function useSearch(searcher = streamSearch) {
     try {
       const summary = await searcher(nextQuery, {
         signal: request.signal,
+        disableYellowFilter,
         onResults(items) {
           if (version !== generation || request.signal.aborted) return
           for (const item of items) {
@@ -100,7 +107,7 @@ export function useSearch(searcher = streamSearch) {
       interrupted.value = summary.timedOut || summary.failedSources > 0 || summary.completedSources < summary.totalSources
       if (!results.value.length && interrupted.value) error.value = '部分来源暂时没有响应，请稍后重试'
       if (!interrupted.value && canCache(results.value)) {
-        recentSearches.set(nextQuery, { results: results.value, progress: summary, expires: Date.now() + 60000 })
+        recentSearches.set(cacheKey, { results: results.value, progress: summary, expires: Date.now() + 60000 })
         if (recentSearches.size > 8) recentSearches.delete(recentSearches.keys().next().value!)
       }
     } catch (cause) {
@@ -117,6 +124,24 @@ export function useSearch(searcher = streamSearch) {
     }
   }
 
-  onScopeDispose(() => { stop(); clearTimeout(flushTimer) })
+  function refreshForFilterChange(event?: Event) {
+    if (event && !isYellowFilterChange(event)) return
+    recentSearches.clear()
+    if (query.value) void run(query.value, true)
+  }
+
+  watch([() => siteStore.disableYellowFilter, () => siteStore.yellowFilterApplyGlobally], () => refreshForFilterChange())
+  if (typeof window !== 'undefined') {
+    window.addEventListener(YELLOW_FILTER_CHANGE_EVENT, refreshForFilterChange)
+    window.addEventListener('storage', refreshForFilterChange)
+  }
+  onScopeDispose(() => {
+    stop()
+    clearTimeout(flushTimer)
+    if (typeof window !== 'undefined') {
+      window.removeEventListener(YELLOW_FILTER_CHANGE_EVENT, refreshForFilterChange)
+      window.removeEventListener('storage', refreshForFilterChange)
+    }
+  })
   return { results, query, loading, error, interrupted, fromCache, progress, run, stop, clear }
 }

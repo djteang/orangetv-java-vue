@@ -47,7 +47,7 @@ const activePath = computed(() => {
   const queryString = new URLSearchParams(route.query as Record<string, string>).toString()
   return queryString ? `${route.path}?${queryString}` : route.path
 })
-const showBackButton = computed(() => ['/play', '/live'].includes(route.path))
+const showBackButton = computed(() => route.path === '/play')
 </script>
 
 <template>

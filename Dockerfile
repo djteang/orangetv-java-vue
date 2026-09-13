@@ -1,6 +1,8 @@
 # ============ 运行阶段：Nginx + JRE ============
 FROM eclipse-temurin:17-jre
 
+ENV TZ=Asia/Shanghai
+
 # 安装 Nginx
 RUN apt-get update && apt-get install -y nginx dos2unix && rm -rf /var/lib/apt/lists/*
 

@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { X, Smile, Image as ImageIcon, Loader2, Wallpaper, Mic, Play, Pause } from 'lucide-vue-next'
 import { useAuthStore } from '@/stores/auth'
+import { formatChatMessageTime as formatMessageTime } from '@/utils/datetime'
 import { useWebSocket } from '@/services/websocket'
 import { useToast } from '@/composables/useToast'
 import request from '@/api/index'
@@ -216,36 +217,6 @@ async function uploadBackground(event: Event) {
   } finally {
     uploadingBg.value = false
     input.value = ''
-  }
-}
-
-// Format time like WeChat (adjust for China timezone)
-function formatMessageTime(timestamp: number): string {
-  // 如果服务器时区是 UTC，但数据库存储的是中国时间的时间戳
-  // 需要加上 8 小时的偏移（8 * 60 * 60 * 1000 = 28800000）
-  const adjustedTimestamp = timestamp + (8 * 60 * 60 * 1000)
-  const date = new Date(adjustedTimestamp)
-  const now = new Date()
-
-  const hours = date.getHours().toString().padStart(2, '0')
-  const minutes = date.getMinutes().toString().padStart(2, '0')
-  const timeStr = `${hours}:${minutes}`
-
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-  const yesterday = new Date(today.getTime() - 24 * 60 * 60 * 1000)
-  const dayBeforeYesterday = new Date(today.getTime() - 2 * 24 * 60 * 60 * 1000)
-  const msgDay = new Date(date.getFullYear(), date.getMonth(), date.getDate())
-
-  if (msgDay.getTime() === today.getTime()) {
-    return timeStr
-  } else if (msgDay.getTime() === yesterday.getTime()) {
-    return `昨天 ${timeStr}`
-  } else if (msgDay.getTime() === dayBeforeYesterday.getTime()) {
-    return `前天 ${timeStr}`
-  } else if (date.getFullYear() === now.getFullYear()) {
-    return `${date.getMonth() + 1}月${date.getDate()}日 ${timeStr}`
-  } else {
-    return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日 ${timeStr}`
   }
 }
 

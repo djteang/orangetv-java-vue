@@ -29,8 +29,7 @@ const bindMachineCode = ref(false)
 const requireMachineCode = ref(false)
 
 // 版本信息
-const CURRENT_VERSION = '9.0.1'
-
+const CURRENT_VERSION = '9.2.0'
 // 输入框是否有值（用于浮动标签效果）
 const usernameHasValue = computed(() => username.value.length > 0)
 const passwordHasValue = computed(() => password.value.length > 0)

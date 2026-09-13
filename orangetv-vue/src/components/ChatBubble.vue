@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
+import { formatDateTime } from '@/utils/datetime'
 import { MessageCircle, Users, Check, X, UserPlus, Search, ArrowLeft, Loader2 } from 'lucide-vue-next'
 // import { useAuthStore } from '@/stores/auth'
 import { useWebSocket } from '@/services/websocket'
@@ -479,7 +480,7 @@ onUnmounted(() => {
                   </div>
                   <p v-if="req.message" class="text-xs text-gray-400 truncate">{{ req.message }}</p>
                   <p class="text-xs text-gray-400 mt-0.5">
-                    {{ new Date(req.created_at).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) }}
+                    {{ formatDateTime(req.created_at, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) }}
                   </p>
                 </div>
                 <!-- 收到的 pending 状态显示操作按钮 -->
@@ -528,7 +529,7 @@ onUnmounted(() => {
                   </div>
                   <p class="text-xs text-gray-400 truncate">{{ invite.videoTitle }}</p>
                   <p class="text-xs text-gray-400 mt-0.5">
-                    {{ new Date(invite.timestamp).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) }}
+                    {{ formatDateTime(invite.timestamp, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) }}
                   </p>
                 </div>
                 <span v-if="invite.expired" class="text-xs text-gray-400 flex-shrink-0">已失效</span>

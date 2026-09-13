@@ -24,7 +24,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.LocalDateTime;
+import com.orangetv.util.AppTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -81,7 +81,7 @@ public class AuthService {
         }
 
         // 更新最后登录时间
-        user.setLastLoginAt(LocalDateTime.now());
+        user.setLastLoginAt(AppTime.now());
         userRepository.save(user);
 
         // 生成 JWT token
@@ -166,7 +166,7 @@ public class AuthService {
 
             if (matchingCode.isPresent()) {
                 // 设备码匹配，更新最后使用时间
-                matchingCode.get().setLastUsedAt(LocalDateTime.now());
+                matchingCode.get().setLastUsedAt(AppTime.now());
                 machineCodeRepository.save(matchingCode.get());
                 return true;
             } else {
@@ -185,8 +185,8 @@ public class AuthService {
         MachineCode newCode = MachineCode.builder()
                 .user(user)
                 .machineCode(machineCode)
-                .createdAt(LocalDateTime.now())
-                .lastUsedAt(LocalDateTime.now())
+                .createdAt(AppTime.now())
+                .lastUsedAt(AppTime.now())
                 .build();
         machineCodeRepository.save(newCode);
 

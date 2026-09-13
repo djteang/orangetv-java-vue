@@ -3,6 +3,7 @@ package com.orangetv.service;
 import com.orangetv.entity.LiveSource;
 import com.orangetv.exception.ApiException;
 import com.orangetv.repository.LiveSourceRepository;
+import com.orangetv.util.LiveHeaders;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.cache.annotation.CacheEvict;
@@ -31,7 +32,7 @@ public class LiveSourceService {
         return liveSourceRepository.findByEnabledTrueOrderBySortOrderAsc();
     }
 
-    @CacheEvict(value = "live", allEntries = true)
+    @CacheEvict(value = {"live", "epg"}, allEntries = true)
     @Transactional
     public void addSource(String name, String sourceKey, String url, String epgUrl, String userAgent) {
         // 检查 key 是否已存在
@@ -52,7 +53,7 @@ public class LiveSourceService {
         liveSourceRepository.save(source);
     }
 
-    @CacheEvict(value = "live", allEntries = true)
+    @CacheEvict(value = {"live", "epg"}, allEntries = true)
     @Transactional
     public void editSource(Long id, String name, String sourceKey, String url, String epgUrl, String userAgent) {
         LiveSource source = liveSourceRepository.findById(id)
@@ -67,14 +68,19 @@ public class LiveSourceService {
         }
 
         if (name != null) source.setName(name);
-        if (url != null) source.setUrl(url);
+        if (url != null && !url.equals(source.getUrl())) {
+            source.setUrl(url);
+            source.setChannelConfig(null);
+            source.setRequestHeaders(null);
+            source.setChannelCount(0);
+        }
         source.setEpgUrl(epgUrl); // 允许设置为 null
         source.setUserAgent(userAgent); // 允许设置为 null
 
         liveSourceRepository.save(source);
     }
 
-    @CacheEvict(value = "live", allEntries = true)
+    @CacheEvict(value = {"live", "epg"}, allEntries = true)
     @Transactional
     public void deleteSource(Long id) {
         liveSourceRepository.deleteById(id);
@@ -121,6 +127,8 @@ public class LiveSourceService {
         map.put("url", source.getUrl());
         map.put("epg", source.getEpgUrl());
         map.put("ua", source.getUserAgent());
+        map.put("headers", LiveHeaders.read(source.getRequestHeaders()));
+        map.put("inline", source.getChannelConfig() != null);
         map.put("channelCount", source.getChannelCount());
         map.put("enabled", source.getEnabled());
         map.put("disabled", !source.getEnabled());

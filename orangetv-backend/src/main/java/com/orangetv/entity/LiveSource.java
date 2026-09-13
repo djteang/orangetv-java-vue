@@ -50,6 +50,12 @@ public class LiveSource {
     @Column(name = "user_agent", length = 200)
     private String userAgent;
 
+    @Column(name = "request_headers", columnDefinition = "TEXT")
+    private String requestHeaders;
+
+    @Column(name = "channel_config", columnDefinition = "LONGTEXT")
+    private String channelConfig;
+
     /**
      * 频道数量（缓存）
      */

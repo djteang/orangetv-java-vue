@@ -1,3 +1,3 @@
-const CURRENT_VERSION = '9.1.0'
+const CURRENT_VERSION = '9.2.0'
 
 export { CURRENT_VERSION }

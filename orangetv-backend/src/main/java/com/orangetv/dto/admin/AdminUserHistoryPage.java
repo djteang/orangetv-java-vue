@@ -16,7 +16,14 @@ public record AdminUserHistoryPage<T>(
     public record SearchEntry(Long id, String keyword, Integer searchCount,
                               LocalDateTime createdAt, LocalDateTime updatedAt) {}
 
+    public record SiteSearchEntry(Long id, String username, String keyword, Integer searchCount,
+                                  LocalDateTime createdAt, LocalDateTime updatedAt) {}
+
     public record PlayEntry(Long id, String title, String cover, String sourceName, String year,
                             Integer episodeIndex, String episodeName, Integer totalEpisodes,
                             Double progress, Double duration, LocalDateTime updatedAt) {}
+
+    public record SitePlayEntry(Long id, String username, String title, String cover, String sourceName,
+                                String year, Integer episodeIndex, String episodeName, Integer totalEpisodes,
+                                Double progress, Double duration, LocalDateTime updatedAt) {}
 }

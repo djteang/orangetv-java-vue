@@ -21,7 +21,7 @@ import org.springframework.web.client.RestTemplate;
 
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
-import java.time.LocalDateTime;
+import com.orangetv.util.AppTime;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
@@ -128,8 +128,8 @@ public class LinuxDoOAuthService {
             user.setPassword(UUID.randomUUID().toString()); // 随机密码，OAuth 用户不使用密码登录
             user.setAvatar(avatar);
             user.setRole("user");
-            user.setCreatedAt(LocalDateTime.now());
-            user.setUpdatedAt(LocalDateTime.now());
+            user.setCreatedAt(AppTime.now());
+            user.setUpdatedAt(AppTime.now());
             userRepository.save(user);
             log.info("Created new LinuxDo user: {}", user.getUsername());
         }
@@ -141,7 +141,7 @@ public class LinuxDoOAuthService {
         }
 
         // 更新最后登录时间
-        user.setLastLoginAt(LocalDateTime.now());
+        user.setLastLoginAt(AppTime.now());
         userRepository.save(user);
 
         // 生成 JWT token
@@ -170,7 +170,7 @@ public class LinuxDoOAuthService {
                 throw ApiException.conflict("此设备已绑定到其他账户");
             }
             // 更新最后使用时间
-            existingCode.setLastUsedAt(LocalDateTime.now());
+            existingCode.setLastUsedAt(AppTime.now());
             machineCodeRepository.save(existingCode);
             return true;
         } else {
@@ -178,8 +178,8 @@ public class LinuxDoOAuthService {
             MachineCode newCode = new MachineCode();
             newCode.setUser(user);
             newCode.setMachineCode(machineCode);
-            newCode.setCreatedAt(LocalDateTime.now());
-            newCode.setLastUsedAt(LocalDateTime.now());
+            newCode.setCreatedAt(AppTime.now());
+            newCode.setLastUsedAt(AppTime.now());
             machineCodeRepository.save(newCode);
             return true;
         }

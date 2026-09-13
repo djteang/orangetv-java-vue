@@ -3,6 +3,8 @@ package com.orangetv.service;
 import com.orangetv.dto.admin.AdminUserHistoryPage;
 import com.orangetv.dto.admin.AdminUserHistoryPage.PlayEntry;
 import com.orangetv.dto.admin.AdminUserHistoryPage.SearchEntry;
+import com.orangetv.dto.admin.AdminUserHistoryPage.SiteSearchEntry;
+import com.orangetv.dto.admin.AdminUserHistoryPage.SitePlayEntry;
 import com.orangetv.entity.User;
 import com.orangetv.exception.ApiException;
 import com.orangetv.repository.PlayRecordRepository;
@@ -23,6 +25,22 @@ public class AdminUserHistoryService {
     private final UserRepository userRepository;
     private final SearchHistoryRepository searchHistoryRepository;
     private final PlayRecordRepository playRecordRepository;
+
+    public AdminUserHistoryPage<SiteSearchEntry> getAllSearchHistory(int page, int size) {
+        Pageable pageable = pageRequest(page, size);
+        return AdminUserHistoryPage.from(searchHistoryRepository.findAllByOrderByUpdatedAtDesc(pageable)
+                .map(record -> new SiteSearchEntry(record.getId(), record.getUser().getUsername(),
+                        record.getKeyword(), record.getSearchCount(), record.getCreatedAt(), record.getUpdatedAt())));
+    }
+
+    public AdminUserHistoryPage<SitePlayEntry> getAllPlayHistory(int page, int size) {
+        Pageable pageable = pageRequest(page, size);
+        return AdminUserHistoryPage.from(playRecordRepository.findAllByOrderByUpdatedAtDesc(pageable)
+                .map(record -> new SitePlayEntry(record.getId(), record.getUser().getUsername(),
+                        record.getTitle(), record.getCover(), record.getApiName(), record.getYear(),
+                        record.getEpisodeIndex(), record.getEpisodeName(), record.getTotalEpisodes(),
+                        record.getProgress(), record.getDuration(), record.getUpdatedAt())));
+    }
 
     public AdminUserHistoryPage<SearchEntry> getSearchHistory(String username, int page, int size) {
         Pageable pageable = pageRequest(page, size);

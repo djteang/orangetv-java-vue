@@ -48,6 +48,7 @@ const routes: RouteRecordRaw[] = [
     path: '/live',
     name: 'Live',
     component: () => import('@/views/LiveView.vue'),
+    meta: { requiresAuth: true },
   },
   {
     path: '/admin',

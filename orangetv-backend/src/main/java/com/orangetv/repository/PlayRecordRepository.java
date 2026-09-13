@@ -4,9 +4,11 @@ import com.orangetv.entity.PlayRecord;
 import com.orangetv.entity.User;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -16,6 +18,11 @@ public interface PlayRecordRepository extends JpaRepository<PlayRecord, Long> {
     List<PlayRecord> findByUserOrderByUpdatedAtDesc(User user);
 
     Page<PlayRecord> findByUserOrderByUpdatedAtDesc(User user, Pageable pageable);
+
+    @EntityGraph(attributePaths = "user")
+    Page<PlayRecord> findAllByOrderByUpdatedAtDesc(Pageable pageable);
+
+    long countByUpdatedAtGreaterThanEqualAndUpdatedAtLessThan(LocalDateTime start, LocalDateTime end);
 
     List<PlayRecord> findByUserIdOrderByUpdatedAtDesc(Long userId);
 

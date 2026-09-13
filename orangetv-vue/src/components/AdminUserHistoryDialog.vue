@@ -1,17 +1,18 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue'
-import { ChevronLeft, ChevronRight, Film, History, Loader2, Search, X } from 'lucide-vue-next'
+import { ChevronLeft, ChevronRight, Film, History, Loader2, Search, UserRound, X } from 'lucide-vue-next'
+import { formatDateTime } from '@/utils/datetime'
 import type { User } from '@/types'
 import type { AdminHistoryPage, AdminPlayHistoryEntry, AdminSearchHistoryEntry } from '@/types/admin'
-import { getUserPlayHistory, getUserSearchHistory } from '@/api/admin'
+import { getAllPlayHistory, getAllSearchHistory, getUserPlayHistory, getUserSearchHistory } from '@/api/admin'
 
-const props = defineProps<{ user: User }>()
+const props = defineProps<{ user?: User; allUsers?: boolean; initialTab?: 'search' | 'play' }>()
 const emit = defineEmits<{ close: [] }>()
 const id = useId()
 const dialogRef = ref<HTMLDialogElement | null>(null)
 const contentRef = ref<HTMLElement | null>(null)
 const tabsRef = ref<HTMLElement | null>(null)
-const activeTab = ref<'search' | 'play'>('search')
+const activeTab = ref<'search' | 'play'>(props.initialTab ?? 'search')
 const page = ref(0)
 const pageSize = 20
 const searchEntries = ref<AdminSearchHistoryEntry[]>([])
@@ -22,6 +23,7 @@ const loading = ref(true)
 const error = ref('')
 const failedCovers = ref(new Set<number>())
 const tabLabel = computed(() => activeTab.value === 'search' ? '搜索记录' : '观影记录')
+const dialogTitle = computed(() => props.allUsers ? '全站' + tabLabel.value : '用户记录')
 const rangeStart = computed(() => total.value ? page.value * pageSize + 1 : 0)
 const rangeEnd = computed(() => Math.min((page.value + 1) * pageSize, total.value))
 let controller: AbortController | undefined
@@ -39,7 +41,7 @@ async function fetchHistory() {
   controller?.abort()
   const nextController = new AbortController()
   controller = nextController
-  const username = props.user.username
+  const username = props.user?.username
   const requestedPage = page.value
   loading.value = true
   error.value = ''
@@ -51,13 +53,18 @@ async function fetchHistory() {
   if (contentRef.value) contentRef.value.scrollTop = 0
 
   try {
+    if (!props.allUsers && !username) throw new Error('请指定用户')
     if (activeTab.value === 'search') {
-      const data = await getUserSearchHistory(username, requestedPage, pageSize, nextController.signal)
+      const data = props.allUsers
+        ? await getAllSearchHistory(requestedPage, pageSize, nextController.signal)
+        : await getUserSearchHistory(username!, requestedPage, pageSize, nextController.signal)
       if (currentRequest !== requestId || nextController.signal.aborted) return
       searchEntries.value = data.items
       applyPage(data)
     } else {
-      const data = await getUserPlayHistory(username, requestedPage, pageSize, nextController.signal)
+      const data = props.allUsers
+        ? await getAllPlayHistory(requestedPage, pageSize, nextController.signal)
+        : await getUserPlayHistory(username!, requestedPage, pageSize, nextController.signal)
       if (currentRequest !== requestId || nextController.signal.aborted) return
       playEntries.value = data.items
       applyPage(data)
@@ -88,9 +95,7 @@ async function handleTabKey(event: KeyboardEvent) {
 }
 
 function formatDate(value: string | null) {
-  if (!value) return '时间未知'
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? '时间未知' : date.toLocaleString('zh-CN', { hour12: false })
+  return formatDateTime(value)
 }
 
 function formatDuration(value: number | null) {
@@ -118,8 +123,8 @@ function closeOnBackdrop(event: MouseEvent) {
   if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) emit('close')
 }
 
-watch(() => props.user.username, () => { page.value = 0 }, { flush: 'sync' })
-watch([() => props.user.username, activeTab, page], () => { void fetchHistory() }, { immediate: true })
+watch([() => props.user?.username, () => props.allUsers, () => props.initialTab], () => { page.value = 0; activeTab.value = props.initialTab ?? 'search' }, { flush: 'sync' })
+watch([() => props.user?.username, () => props.allUsers, activeTab, page], () => { void fetchHistory() }, { immediate: true })
 
 onMounted(() => {
   trigger = document.activeElement instanceof HTMLElement ? document.activeElement : null
@@ -142,33 +147,37 @@ onBeforeUnmount(() => {
     <dialog ref="dialogRef" class="user-history-dialog" :aria-labelledby="id + '-title'" :aria-describedby="id + '-user'" aria-modal="true" @cancel.prevent="emit('close')" @click="closeOnBackdrop">
       <header class="history-heading">
         <span class="history-heading-icon"><History :size="22" aria-hidden="true" /></span>
-        <div class="history-heading-text"><h2 :id="id + '-title'">用户记录</h2><p :id="id + '-user'">{{ user.username }}</p></div>
-        <button type="button" class="history-close" aria-label="关闭用户记录" autofocus @click="emit('close')"><X :size="20" aria-hidden="true" /></button>
+        <div class="history-heading-text"><h2 :id="id + '-title'">{{ dialogTitle }}</h2><p :id="id + '-user'">{{ allUsers ? '所有用户的' + tabLabel : user?.username }}</p></div>
+        <button type="button" class="history-close" :aria-label="'关闭' + dialogTitle" autofocus @click="emit('close')"><X :size="20" aria-hidden="true" /></button>
       </header>
 
-      <div ref="tabsRef" class="history-tabs" role="tablist" aria-label="记录类型" @keydown="handleTabKey">
+      <div v-if="!allUsers" ref="tabsRef" class="history-tabs" role="tablist" aria-label="记录类型" @keydown="handleTabKey">
         <button :id="id + '-search-tab'" type="button" role="tab" :aria-selected="activeTab === 'search'" :aria-controls="id + '-panel'" :tabindex="activeTab === 'search' ? 0 : -1" @click="selectTab('search')"><Search :size="16" aria-hidden="true" />搜索记录</button>
         <button :id="id + '-play-tab'" type="button" role="tab" :aria-selected="activeTab === 'play'" :aria-controls="id + '-panel'" :tabindex="activeTab === 'play' ? 0 : -1" @click="selectTab('play')"><Film :size="16" aria-hidden="true" />观影记录</button>
       </div>
 
-      <div ref="contentRef" :id="id + '-panel'" class="history-content" role="tabpanel" :aria-labelledby="id + '-' + activeTab + '-tab'" :aria-busy="loading" tabindex="0">
+      <div ref="contentRef" :id="id + '-panel'" class="history-content" :role="allUsers ? 'region' : 'tabpanel'" :aria-labelledby="allUsers ? id + '-title' : id + '-' + activeTab + '-tab'" :aria-busy="loading" tabindex="0">
         <div v-if="loading" class="history-state" role="status"><Loader2 :size="28" class="animate-spin" aria-hidden="true" /><p>正在加载{{ tabLabel }}…</p></div>
         <div v-else-if="error" class="history-state" role="alert"><History :size="30" aria-hidden="true" /><p>{{ error }}</p><button type="button" class="history-retry" @click="fetchHistory">重新加载</button></div>
-        <div v-else-if="!total" class="history-state" role="status"><component :is="activeTab === 'search' ? Search : Film" :size="32" aria-hidden="true" /><h3>暂无{{ tabLabel }}</h3><p>该用户还没有保存的{{ tabLabel }}。</p></div>
+        <div v-else-if="!total" class="history-state" role="status"><component :is="activeTab === 'search' ? Search : Film" :size="32" aria-hidden="true" /><h3>暂无{{ tabLabel }}</h3><p>{{ allUsers ? '全站' : '该用户' }}还没有保存的{{ tabLabel }}。</p></div>
 
         <template v-else-if="activeTab === 'search'">
-          <p class="history-description">按最近搜索时间排序，同一关键词合并显示。</p>
+          <p class="history-description">按最近搜索时间排序，{{ allUsers ? '同一用户的相同关键词' : '同一关键词' }}合并显示。</p>
           <ul class="search-history-list" aria-label="搜索记录">
             <li v-for="record in searchEntries" :key="record.id" class="search-history-item">
               <span class="history-record-icon"><Search :size="16" aria-hidden="true" /></span>
-              <div class="search-record-body"><h3>{{ record.keyword }}</h3><p>最近搜索 <time :datetime="record.updatedAt || undefined">{{ formatDate(record.updatedAt) }}</time></p></div>
+              <div class="search-record-body">
+                <h3>{{ record.keyword }}</h3>
+                <p v-if="allUsers" class="search-record-user"><UserRound :size="13" aria-hidden="true" /><span>{{ record.username || '未知用户' }}</span></p>
+                <p>最近搜索 <time :datetime="record.updatedAt || undefined">{{ formatDate(record.updatedAt) }}</time></p>
+              </div>
               <span class="search-count">{{ record.searchCount?.toLocaleString('zh-CN') ?? '—' }} 次</span>
             </li>
           </ul>
         </template>
 
         <template v-else>
-          <p class="history-description">按最近观看时间排序，展示各影片保存的最新进度。</p>
+          <p class="history-description">按最近观看时间排序，展示{{ allUsers ? '每位用户在' : '' }}各影片保存的最新进度。</p>
           <ul class="play-history-list" aria-label="观影记录">
             <li v-for="record in playEntries" :key="record.id" class="play-history-item">
               <div class="play-cover">
@@ -177,6 +186,7 @@ onBeforeUnmount(() => {
               </div>
               <div class="play-record-body">
                 <div class="play-record-heading"><h3>{{ record.title || '未命名影片' }}</h3><span v-if="record.year" class="play-year">{{ record.year }}</span></div>
+                <p v-if="allUsers" class="play-record-user"><UserRound :size="13" aria-hidden="true" /><span>{{ record.username || '未知用户' }}</span></p>
                 <p class="play-source">{{ record.sourceName || '来源未记录' }}<span> · </span>{{ episodeLabel(record) }}</p>
                 <div class="play-progress-label"><span>{{ formatDuration(record.progress) }} / {{ formatDuration(record.duration) }}</span><span>{{ progressPercent(record) === null ? '进度未知' : '已看 ' + progressPercent(record) + '%' }}</span></div>
                 <div v-if="progressPercent(record) !== null" class="play-progress" role="progressbar" :aria-label="(record.title || '影片') + '观看进度'" :aria-valuenow="progressPercent(record) ?? undefined" :aria-valuemin="0" :aria-valuemax="100"><span :style="{ width: progressPercent(record) + '%' }"></span></div>
@@ -189,7 +199,7 @@ onBeforeUnmount(() => {
 
       <footer class="history-footer">
         <p aria-live="polite">{{ loading ? '正在读取记录…' : error ? '暂未获取到记录' : '第 ' + rangeStart + '–' + rangeEnd + ' 条，共 ' + total.toLocaleString('zh-CN') + ' 条' }}</p>
-        <nav aria-label="用户记录分页">
+        <nav :aria-label="dialogTitle + '分页'">
           <button type="button" aria-label="上一页记录" :disabled="loading || !!error || page === 0" @click="page--"><ChevronLeft :size="18" aria-hidden="true" /></button>
           <span>{{ loading || error || !totalPages ? '—' : (page + 1) + ' / ' + totalPages }}</span>
           <button type="button" aria-label="下一页记录" :disabled="loading || !!error || page + 1 >= totalPages" @click="page++"><ChevronRight :size="18" aria-hidden="true" /></button>
@@ -200,7 +210,7 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.user-history-dialog { width: calc(100% - 32px); max-width: 760px; max-height: min(820px, calc(100dvh - 48px)); margin: auto; padding: 0; overflow: hidden; border: 1px solid rgb(var(--color-theme-border)); border-radius: 22px; background: rgb(var(--color-theme-surface)); color: rgb(var(--color-theme-text)); box-shadow: 0 24px 90px rgb(0 0 0 / .22); }
+.user-history-dialog { width: calc(100% - 32px); max-width: 760px; height: min(820px, calc(100vh - 48px)); height: min(820px, calc(100dvh - 48px)); max-height: none; margin: auto; padding: 0; overflow: hidden; border: 1px solid rgb(var(--color-theme-border)); border-radius: 22px; background: rgb(var(--color-theme-surface)); color: rgb(var(--color-theme-text)); box-shadow: 0 24px 90px rgb(0 0 0 / .22); }
 .user-history-dialog[open] { display: flex; flex-direction: column; }
 .user-history-dialog::backdrop { background: rgb(0 0 0 / .45); backdrop-filter: blur(5px); }
 .history-heading { display: flex; flex-shrink: 0; align-items: center; gap: 13px; padding: 24px 26px 20px; }
@@ -226,6 +236,10 @@ onBeforeUnmount(() => {
 .search-record-body { flex: 1; min-width: 0; }
 .search-record-body h3 { overflow-wrap: anywhere; font-size: 14px; font-weight: 550; }
 .search-record-body p { margin-top: 6px; color: rgb(var(--color-theme-text-secondary)); font-size: 11px; line-height: 1.7; }
+.search-record-user, .play-record-user { display: flex; align-items: center; gap: 5px; overflow-wrap: anywhere; }
+.search-record-user svg, .play-record-user svg { flex-shrink: 0; }
+.search-record-user span, .play-record-user span { min-width: 0; }
+.play-record-user { margin-top: 6px; color: rgb(var(--color-theme-text-secondary)); font-size: 11px; line-height: 1.7; }
 .search-count { flex-shrink: 0; border-radius: 6px; padding: 4px 8px; background: rgb(var(--color-theme-accent) / .08); color: rgb(var(--color-theme-accent)); font-size: 11px; font-variant-numeric: tabular-nums; }
 .play-history-item { display: flex; align-items: flex-start; gap: 16px; min-width: 0; padding: 16px; border: 1px solid rgb(var(--color-theme-border) / .75); border-radius: 14px; }
 .play-cover { display: grid; width: 70px; height: 100px; flex-shrink: 0; place-items: center; overflow: hidden; border-radius: 9px; background: rgb(var(--color-theme-accent) / .07); color: rgb(var(--color-theme-accent) / .55); }
@@ -246,8 +260,16 @@ onBeforeUnmount(() => {
 .history-footer nav button { display: grid; width: 36px; height: 36px; place-items: center; border: 1px solid rgb(var(--color-theme-border)); border-radius: 9px; background: rgb(var(--color-theme-surface)); }
 .history-footer nav button:hover:not(:disabled) { border-color: rgb(var(--color-theme-accent)); color: rgb(var(--color-theme-accent)); }
 .history-footer nav button:disabled { cursor: not-allowed; opacity: .35; }
-@media (max-width: 639px) {
-  .user-history-dialog { width: calc(100% - 20px); max-height: calc(100dvh - 24px); border-radius: 17px; }
+@media (max-width: 639px), (max-height: 540px) {
+  .user-history-dialog {
+    --history-top-gap: max(12px, env(safe-area-inset-top, 0px));
+    --history-bottom-gap: max(12px, env(safe-area-inset-bottom, 0px));
+    width: calc(100% - 20px);
+    height: calc(100vh - var(--history-top-gap) - var(--history-bottom-gap));
+    height: calc(100dvh - var(--history-top-gap) - var(--history-bottom-gap));
+    margin: var(--history-top-gap) auto var(--history-bottom-gap);
+    border-radius: 17px;
+  }
   .history-heading { gap: 10px; padding: 18px 16px 16px; }
   .history-tabs { margin: 0 16px; }
   .history-content { padding: 16px; }
@@ -256,6 +278,12 @@ onBeforeUnmount(() => {
   .history-record-icon { display: none; }
   .play-history-item { padding: 12px; gap: 11px; }
   .play-cover { width: 52px; height: 76px; }
+}
+@media (max-height: 540px) {
+  .history-heading { padding-top: 10px; padding-bottom: 10px; }
+  .history-heading-icon { width: 36px; height: 36px; border-radius: 10px; }
+  .history-footer { gap: 6px; padding-top: 8px; padding-bottom: 8px; }
+  .history-state { min-height: 160px; padding: 16px; }
 }
 @media (prefers-reduced-motion: reduce) { .history-state svg { animation: none; } }
 </style>

@@ -4,6 +4,7 @@ import com.orangetv.entity.SearchHistory;
 import com.orangetv.entity.User;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 
@@ -17,6 +18,9 @@ public interface SearchHistoryRepository extends JpaRepository<SearchHistory, Lo
     List<SearchHistory> findByUserOrderByUpdatedAtDesc(User user);
 
     Page<SearchHistory> findByUserOrderByUpdatedAtDesc(User user, Pageable pageable);
+
+    @EntityGraph(attributePaths = "user")
+    Page<SearchHistory> findAllByOrderByUpdatedAtDesc(Pageable pageable);
 
     List<SearchHistory> findByUserIdOrderByUpdatedAtDesc(Long userId);
 

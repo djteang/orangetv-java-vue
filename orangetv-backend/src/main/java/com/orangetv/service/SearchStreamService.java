@@ -58,9 +58,11 @@ public class SearchStreamService {
         return timer;
     }
 
-    public SseEmitter search(String keyword) {
+    public SseEmitter search(String keyword, boolean disableYellowFilter) {
         SseEmitter emitter = new SseEmitter(timeoutMillis + 2000);
-        SearchSession session = new SearchSession(keyword, videoSourceService.getEnabledSources(), emitter);
+        List<Map<String, Object>> sources = videoSourceService.getEnabledSources();
+        SearchSession session = new SearchSession(keyword, sources, emitter,
+                !sources.isEmpty() && searchService.isYellowFilterDisabled(disableYellowFilter));
         emitter.onCompletion(session::cancel);
         emitter.onTimeout(() -> session.finish(true));
         emitter.onError(error -> session.cancel());
@@ -70,6 +72,7 @@ public class SearchStreamService {
 
     private final class SearchSession {
         private final String keyword;
+        private final boolean yellowFilterDisabled;
         private final List<Map<String, Object>> sources;
         private final SseEmitter emitter;
         private final AtomicBoolean closed = new AtomicBoolean();
@@ -80,7 +83,8 @@ public class SearchStreamService {
         private final Object writeLock = new Object();
         private volatile ScheduledFuture<?> deadline;
 
-        SearchSession(String keyword, List<Map<String, Object>> sources, SseEmitter emitter) {
+        SearchSession(String keyword, List<Map<String, Object>> sources, SseEmitter emitter, boolean yellowFilterDisabled) {
+            this.yellowFilterDisabled = yellowFilterDisabled;
             this.keyword = keyword;
             this.sources = sources;
             this.emitter = emitter;
@@ -111,7 +115,7 @@ public class SearchStreamService {
                     try {
                         searchService.searchSourcePages(source, keyword, searchClient, batch -> {
                             if (closed.get()) return;
-                            List<Map<String, Object>> filtered = searchService.filterSearchResults(batch, keyword);
+                            List<Map<String, Object>> filtered = searchService.filterSearchResults(batch, keyword, yellowFilterDisabled);
                             if (!filtered.isEmpty()) send("results", Map.of("source", source.get("key"), "results", filtered));
                         }, closed::get);
                     } catch (Exception e) {

@@ -114,6 +114,8 @@ ADMIN_USERNAME=admin
 ADMIN_PASSWORD=admin123456
 ```
 
+TVBox 直播配置、支持的流格式及已有数据库升级步骤见 [直播兼容说明](LIVE_TVBOX.md)。
+
 3. **构建后端**
 ```bash
 cd orangetv-backend

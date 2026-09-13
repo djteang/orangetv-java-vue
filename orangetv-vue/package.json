@@ -9,7 +9,9 @@
     "preview": "vite preview",
     "lint": "eslint . --ext .vue,.js,.jsx,.cjs,.mjs,.ts,.tsx,.cts,.mts --fix",
     "typecheck": "vue-tsc --noEmit",
-    "test:search": "node scripts/check-search.mjs"
+    "test:search": "node scripts/check-search.mjs",
+    "test:timezone": "node scripts/check-timezone.mjs",
+    "test:live": "node scripts/check-live.mjs"
   },
   "dependencies": {
     "@heroicons/vue": "^2.2.0",
@@ -21,6 +23,7 @@
     "crypto-js": "^4.2.0",
     "hls.js": "^1.6.10",
     "lucide-vue-next": "^0.438.0",
+    "mpegts.js": "^1.8.0",
     "pinia": "^2.2.0",
     "sockjs-client": "^1.6.1",
     "swiper": "^11.2.8",

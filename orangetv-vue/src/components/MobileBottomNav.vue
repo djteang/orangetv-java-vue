@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, useId, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { Home, Search, Sparkles, Film, User, Tv, Cat, Clover, X, Check } from 'lucide-vue-next'
+import { Home, Search, Sparkles, Film, User, Tv, Radio, Cat, Clover, X, Check } from 'lucide-vue-next'
 
 interface Props {
   activePath?: string
@@ -32,7 +32,7 @@ const navItems = [
   { icon: Search, label: '搜索', href: '/search' },
   { icon: Sparkles, label: '推荐', href: '/recommend' },
   { icon: Film, label: '分类', href: '/douban' },
-  // { icon: Radio, label: '直播', href: '/live' },
+  { icon: Radio, label: '直播', href: '/live' },
   { icon: User, label: '我的', href: '/admin' },
 ]
 
@@ -41,7 +41,7 @@ function isActive(href: string): boolean {
   if (href === '/search') return props.activePath === '/search'
   if (href === '/recommend') return props.activePath.startsWith('/recommend')
   if (href.startsWith('/douban')) return props.activePath.startsWith('/douban') || props.activePath.startsWith('/shortdrama')
-  if (href === '/live') return props.activePath === '/live'
+  if (href === '/live') return props.activePath.split('?')[0] === '/live'
   if (href === '/admin') return props.activePath === '/admin'
   return false
 }

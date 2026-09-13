@@ -26,6 +26,7 @@ CREATE TABLE `chat_messages`  (
   `conversation_id` varchar(36) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
   `sender_id` bigint(20) NOT NULL,
   `content` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `voice_duration` INT NULL COMMENT '语音时长（秒）',
   `message_type` varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL DEFAULT 'text' COMMENT 'text, image, video, system',
   `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`) USING BTREE,
@@ -156,6 +157,8 @@ CREATE TABLE `live_sources`  (
   `channel_count` int(11) NULL DEFAULT NULL,
   `source_key` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
   `user_agent` varchar(200) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL DEFAULT NULL,
+  `request_headers` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL,
+  `channel_config` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL,
   PRIMARY KEY (`id`) USING BTREE,
   UNIQUE INDEX `UK_kyparen9e9qn1mtu1pfeqbdsd`(`source_key`) USING BTREE,
   INDEX `idx_enabled_sort`(`enabled`, `sort_order`) USING BTREE

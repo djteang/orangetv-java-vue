@@ -9,6 +9,7 @@ services:
       - /home/orangetv-java/uploads:/app/uploads
     environment:
       # Java 内存配置
+      - TZ=Asia/Shanghai
       - JAVA_OPTS=-Xmx512m -Xms256m
 
       # 数据库配置

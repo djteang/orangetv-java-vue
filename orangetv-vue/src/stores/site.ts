@@ -13,6 +13,10 @@ interface ServerConfig {
   announcements?: SiteAnnouncement[]
   enableLinuxDoLogin?: boolean
   enableDanmu?: boolean
+  disableYellowFilter?: boolean
+  disable_yellow_filter?: boolean
+  yellowFilterApplyGlobally?: boolean
+  yellow_filter_apply_globally?: boolean
   danmuApiUrl?: string
 }
 
@@ -25,6 +29,8 @@ export const useSiteStore = defineStore('site', () => {
   const allowRegistration = ref(true)
   const enableLinuxDoLogin = ref(false)
   const enableDanmu = ref(false)
+  const disableYellowFilter = ref(false)
+  const yellowFilterApplyGlobally = ref(false)
   const danmuApiUrl = ref('')
   const loading = ref(false)
   const loaded = ref(false)
@@ -42,6 +48,8 @@ export const useSiteStore = defineStore('site', () => {
         allowRegistration.value = config.allowRegistration ?? true
         enableLinuxDoLogin.value = config.enableLinuxDoLogin ?? false
         enableDanmu.value = config.enableDanmu ?? false
+        disableYellowFilter.value = config.disableYellowFilter ?? config.disable_yellow_filter ?? false
+        yellowFilterApplyGlobally.value = config.yellowFilterApplyGlobally ?? config.yellow_filter_apply_globally ?? disableYellowFilter.value
         danmuApiUrl.value = config.danmuApiUrl ?? ''
         loaded.value = true
       })
@@ -64,6 +72,8 @@ export const useSiteStore = defineStore('site', () => {
     allowRegistration,
     enableLinuxDoLogin,
     enableDanmu,
+    disableYellowFilter,
+    yellowFilterApplyGlobally,
     danmuApiUrl,
     loading,
     loaded,

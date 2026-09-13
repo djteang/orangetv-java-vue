@@ -4,6 +4,7 @@ import com.orangetv.dto.user.FavoriteDto;
 import com.orangetv.dto.user.SaveFavoriteRequest;
 import com.orangetv.entity.Favorite;
 import com.orangetv.entity.User;
+import com.orangetv.util.AppTime;
 import com.orangetv.exception.ApiException;
 import com.orangetv.repository.FavoriteRepository;
 import com.orangetv.repository.UserRepository;
@@ -84,8 +85,7 @@ public class FavoriteService {
                 .sourceName(favorite.getApiName())
                 .totalEpisodes(favorite.getVodRemarks() != null ?
                         Integer.parseInt(favorite.getVodRemarks()) : null)
-                .saveTime(favorite.getCreatedAt() != null ?
-                        favorite.getCreatedAt().toEpochSecond(java.time.ZoneOffset.UTC) * 1000 : null)
+                .saveTime(AppTime.toEpochMillis(favorite.getCreatedAt()))
                 .build();
     }
 }

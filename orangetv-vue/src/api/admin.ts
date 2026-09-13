@@ -1,6 +1,6 @@
 import request from './index'
 import axios from 'axios'
-import type { AdminStats, AdminHistoryPage, AdminSearchHistoryEntry, AdminPlayHistoryEntry } from '@/types/admin'
+import type { AdminStats, AdminHistoryPage, AdminSearchHistoryEntry, AdminPlayHistoryEntry, ConfigFilePreview, ConfigSyncResult } from '@/types/admin'
 import type { AdminConfig, User, VideoSource, LiveSource, SiteSettings } from '@/types'
 import { normalizeAnnouncements } from '@/utils/announcements'
 
@@ -16,6 +16,14 @@ export function getStats(): Promise<AdminStats> {
   return request.get('/admin/stats')
 }
 
+export function getAllPlayHistory(page = 0, size = 20, signal?: AbortSignal): Promise<AdminHistoryPage<AdminPlayHistoryEntry>> {
+  return request.get('/admin/play-history', { params: { page, size }, signal })
+}
+
+export function getAllSearchHistory(page = 0, size = 20, signal?: AbortSignal): Promise<AdminHistoryPage<AdminSearchHistoryEntry>> {
+  return request.get('/admin/search-history', { params: { page, size }, signal })
+}
+
 // ─── 站点配置 ─────────────────────────────────────────────────────────────
 
 export function updateSiteConfig(config: SiteSettings): Promise<void> {
@@ -27,6 +35,7 @@ export function updateSiteConfig(config: SiteSettings): Promise<void> {
     announcements,
     require_device_code: config.RequireDeviceCode,
     disable_yellow_filter: config.DisableYellowFilter,
+    yellow_filter_apply_globally: config.YellowFilterApplyGlobally,
     fluid_search: config.FluidSearch,
     enable_linuxdo_login: config.EnableLinuxDoLogin,
     enable_danmu: config.EnableDanmu,
@@ -119,11 +128,11 @@ export function getLiveSources(): Promise<LiveSource[]> {
 }
 
 export function addLiveSource(name: string, key: string, url: string, epg?: string, ua?: string): Promise<void> {
-  return request.post('/admin/live', { action: 'add', name, key, url, epg: epg || '', ua: ua || '' })
+  return request.post('/admin/live', { action: 'add', name, key, url, epg: epg?.trim() || null, ua: ua?.trim() || null })
 }
 
 export function editLiveSource(id: number, name: string, key: string, url: string, epg?: string, ua?: string): Promise<void> {
-  return request.post('/admin/live', { action: 'edit', id, name, key, url, epg: epg || '', ua: ua || '' })
+  return request.post('/admin/live', { action: 'edit', id, name, key, url, epg: epg?.trim() || null, ua: ua?.trim() || null })
 }
 
 export function deleteLiveSource(id: number): Promise<void> {
@@ -148,6 +157,10 @@ export function addCategory(name: string, type: string, query: string): Promise<
   return request.post('/admin/category', { action: 'add', name, type, query })
 }
 
+export function editCategory(index: number, name: string, type: 'movie' | 'tv', query: string): Promise<void> {
+  return request.post('/admin/category', { action: 'edit', index, name, type, query })
+}
+
 export function deleteCategory(index: number): Promise<void> {
   return request.post('/admin/category', { action: 'delete', index })
 }
@@ -162,15 +175,15 @@ export function disableCategory(index: number): Promise<void> {
 
 // ─── 配置文件 ──────────────────────────────────────────────────────────────
 
-export function fetchConfigSubscription(url: string): Promise<string> {
-  return request.post('/admin/config_subscription/fetch', { url })
+export function fetchConfigSubscription(url: string): Promise<ConfigFilePreview> {
+  return request.post('/admin/config_subscription/fetch', { url }, { timeout: 95000 })
 }
 
 export function saveConfigFile(data: {
   config_file?: string
   config_subscription_url?: string
   config_subscription_auto_update?: boolean
-}): Promise<void> {
+}): Promise<ConfigSyncResult> {
   return request.post('/admin/config_file', data)
 }
 

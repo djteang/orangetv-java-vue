@@ -10,6 +10,7 @@ import {
   Cat,
   Clover,
   Sparkles,
+  Radio,
   Menu,
   ExternalLink,
 } from 'lucide-vue-next'
@@ -54,7 +55,7 @@ const menuItems = [
   { icon: Tv, label: '剧集', href: '/douban?type=tv' },
   { icon: Cat, label: '动漫', href: '/douban?type=anime' },
   { icon: Clover, label: '综艺', href: '/douban?type=show' },
-  // { icon: Radio, label: '直播', href: '/live' },
+  { icon: Radio, label: '直播', href: '/live' },
 ]
 
 function isActive(href: string): boolean {
@@ -62,6 +63,7 @@ function isActive(href: string): boolean {
   const decodedHref = decodeURIComponent(href)
 
   if (decodedActive === decodedHref) return true
+  if (href === '/live') return decodedActive.split('?')[0] === '/live'
 
   const typeMatch = href.match(/type=([^&]+)/)?.[1]
   if (typeMatch && decodedActive.startsWith('/douban') && decodedActive.includes(`type=${typeMatch}`)) {
@@ -179,6 +181,9 @@ function isActive(href: string): boolean {
               v-for="item in menuItems"
               :key="item.label"
               :to="item.href"
+              :aria-label="item.label"
+              :aria-current="isActive(item.href) ? 'page' : undefined"
+              :title="isCollapsed ? item.label : undefined"
               :class="[
                 'group flex items-center rounded-lg px-2 py-2 pl-4 text-sm text-gray-700 hover:bg-gray-100/30 hover:text-blue-600 font-medium transition-colors duration-200 min-h-[40px] dark:text-gray-300 dark:hover:text-blue-400 gap-3 justify-start',
                 isActive(item.href) ? 'bg-blue-500/20 text-blue-700 dark:bg-blue-500/10 dark:text-blue-400' : '',

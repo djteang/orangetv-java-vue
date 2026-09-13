@@ -8,6 +8,13 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: '9.2.0',
+    date: '2026-09-13',
+    added: ['直播栏目', '管理面板涉及的新增編輯改为弹窗', '管理面板新增直播源配置'],
+    changed: ['直播源支持JSON / M3U / TXT格式', '本地设置新增黄色过滤器配置'],
+    fixed: ['播放页面遇到第一个源有问题时提示切换播放源'],
+  },
+  {
     version: '9.1.0',
     date: '2026-09-11',
     added: ['推荐栏目', '中国红主题及彩蛋', '暂无内容的动画显示', '聊天支持发送语音'],
