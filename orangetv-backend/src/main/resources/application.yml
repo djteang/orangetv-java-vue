@@ -27,6 +27,8 @@ spring:
       hibernate:
         dialect: org.hibernate.dialect.MySQLDialect
         format_sql: true
+        jdbc:
+          time_zone: Asia/Shanghai
     open-in-view: false
 
   data:
@@ -50,6 +52,7 @@ spring:
       cache-null-values: false
 
   jackson:
+    time-zone: Asia/Shanghai
     serialization:
       write-dates-as-timestamps: false
     deserialization:
