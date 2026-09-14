@@ -7,8 +7,8 @@ import com.orangetv.util.LivePlaylistParser;
 import com.orangetv.util.LiveHeaders;
 import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.HttpStatusCodeException;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
@@ -23,11 +23,16 @@ import java.util.*;
 
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class LiveService {
 
     private final LiveSourceRepository liveSourceRepository;
     private final RestTemplate restTemplate;
+
+    public LiveService(LiveSourceRepository liveSourceRepository,
+                       @Qualifier("liveMetadataRestTemplate") RestTemplate restTemplate) {
+        this.liveSourceRepository = liveSourceRepository;
+        this.restTemplate = restTemplate;
+    }
 
     private static final String DEFAULT_USER_AGENT = "AptvPlayer/1.4.10";
 

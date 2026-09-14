@@ -1,5 +1,7 @@
 package com.orangetv.service;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.orangetv.security.JwtAuthenticationFilter;
 import com.orangetv.util.HlsManifestRewriter;
 import com.orangetv.util.LiveAddress;
 import com.orangetv.util.LiveHeaders;
@@ -28,10 +30,12 @@ import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 @Slf4j
 @Service
 public class LiveStreamService {
+    private static final ObjectMapper ERROR_JSON = new ObjectMapper();
     private final RestTemplate http;
 
     public LiveStreamService(@Qualifier("liveRestTemplate") RestTemplate http) {
@@ -42,30 +46,50 @@ public class LiveStreamService {
     interface Reader<T> { T read(URI url, ClientHttpResponse response, Map<String, String> headers) throws IOException; }
     private record Hop<T>(URI redirect, T value) {}
 
+    private static final class UpstreamFailure extends RuntimeException {
+        private final URI url;
+        private final int redirects;
+        private final long elapsedMillis;
+
+        private UpstreamFailure(URI url, int redirects, long elapsedMillis, RuntimeException cause) {
+            super("直播源请求失败", cause);
+            this.url = url;
+            this.redirects = redirects;
+            this.elapsedMillis = elapsedMillis;
+        }
+    }
+
     private <T> T get(String address, Map<String, String> declaredHeaders, String range, Reader<T> reader) {
         URI url = LiveAddress.httpUri(address);
         Map<String, String> headers = new LinkedHashMap<>(declaredHeaders);
         headers.putIfAbsent("User-Agent", "AptvPlayer/1.4.10");
         for (int redirects = 0; redirects <= 5; redirects++) {
             URI current = url;
-            Hop<T> hop = http.execute(current, HttpMethod.GET, request -> {
-                headers.forEach(request.getHeaders()::set);
-                if (range != null) request.getHeaders().set("Range", range);
-            }, response -> {
-                if (response.getStatusCode().is3xxRedirection()) {
-                    String location = response.getHeaders().getFirst("Location");
-                    if (location == null) throw new IllegalArgumentException("直播跳转缺少目标地址");
-                    return new Hop<>(LiveAddress.httpUri(LiveAddress.resolve(current, location).toASCIIString()), null);
-                }
-                return new Hop<>(null, reader.read(current, response, Map.copyOf(headers)));
-            });
-            if (hop == null) throw new IllegalArgumentException("直播源返回空响应");
-            if (hop.redirect() == null) return hop.value();
-            URI next = hop.redirect();
-            Map<String, String> scoped = LiveHeaders.forUrl(headers, current, next);
-            headers.clear();
-            headers.putAll(scoped);
-            url = next;
+            long started = System.nanoTime();
+            try {
+                Hop<T> hop = http.execute(current, HttpMethod.GET, request -> {
+                    headers.forEach(request.getHeaders()::set);
+                    if (range != null) request.getHeaders().set("Range", range);
+                }, response -> {
+                    if (response.getStatusCode().is3xxRedirection()) {
+                        String location = response.getHeaders().getFirst("Location");
+                        if (location == null) throw new IllegalArgumentException("直播跳转缺少目标地址");
+                        return new Hop<>(LiveAddress.httpUri(LiveAddress.resolve(current, location).toASCIIString()), null);
+                    }
+                    return new Hop<>(null, reader.read(current, response, Map.copyOf(headers)));
+                });
+                if (hop == null) throw new IllegalArgumentException("直播源返回空响应");
+                if (hop.redirect() == null) return hop.value();
+                URI next = hop.redirect();
+                Map<String, String> scoped = LiveHeaders.forUrl(headers, current, next);
+                headers.clear();
+                headers.putAll(scoped);
+                url = next;
+            } catch (RuntimeException failure) {
+                // 超时可能发生在 PHP 跳转后的 CDN，记录实际失败的一跳。
+                throw new UpstreamFailure(current, redirects,
+                        TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started), failure);
+            }
         }
         throw new IllegalArgumentException("直播源跳转次数过多");
     }
@@ -135,8 +159,11 @@ public class LiveStreamService {
                     response.setContentType("application/vnd.apple.mpegurl");
                     response.setCharacterEncoding("UTF-8");
                     String endpoint = request.getContextPath() + "/api/live/stream";
-                    String token = request.getParameter("token");
-                    if (token != null && !token.isBlank()) endpoint += "?token=" + URLEncoder.encode(token, StandardCharsets.UTF_8);
+                    // 子清单和分片沿用本次通过验证的 JWT，不能重新读取可能过期的 query / Cookie。
+                    Object token = request.getAttribute(JwtAuthenticationFilter.AUTHENTICATED_TOKEN_ATTRIBUTE);
+                    if (token instanceof String jwt && !jwt.isBlank()) {
+                        endpoint += "?token=" + URLEncoder.encode(jwt, StandardCharsets.UTF_8);
+                    }
                     response.getWriter().write(HlsManifestRewriter.rewrite(content, resolved, endpoint, effectiveHeaders));
                 } else {
                     for (String header : new String[]{"Content-Type", "Content-Length", "Content-Range", "Accept-Ranges"}) {
@@ -157,12 +184,23 @@ public class LiveStreamService {
             if (!response.isCommitted()) {
                 logFailure("stream", url, e);
                 response.reset();
-                response.sendError(errorStatus(e), errorMessage(e));
+                // sendError 会触发 /error 分派；无状态认证上下文已清除时，真实上游错误会被改成 401。
+                int status = errorStatus(e);
+                response.setStatus(status);
+                response.setContentType("application/json;charset=UTF-8");
+                response.setHeader("Cache-Control", "no-store");
+                ERROR_JSON.writeValue(response.getWriter(), Map.of(
+                        "code", status, "message", errorMessage(e), "errorSource", "upstream"));
             }
         }
     }
 
+    private Exception requestFailureCause(Exception error) {
+        return error instanceof UpstreamFailure failure ? (RuntimeException) failure.getCause() : error;
+    }
+
     private int errorStatus(Exception error) {
+        error = requestFailureCause(error);
         if (error instanceof HttpStatusCodeException httpError) return httpError.getStatusCode().value();
         if (error instanceof ResourceAccessException) return 504;
         return 502;
@@ -176,21 +214,40 @@ public class LiveStreamService {
         return false;
     }
 
-    private void logFailure(String operation, String address, Exception error) {
-        String endpoint = "invalid URL";
+    private String diagnosticEndpoint(String address) {
         try {
             URI uri = LiveAddress.httpUri(address);
-            // 保留排查所需的主机、端口和路径，不把签名参数或账号写入日志。
-            endpoint = uri.getScheme() + "://" + uri.getHost()
+            // 保留主机、端口和路径，不把签名参数或账号写入日志。
+            return uri.getScheme() + "://" + uri.getHost()
                     + (uri.getPort() < 0 ? "" : ":" + uri.getPort()) + uri.getRawPath();
-        } catch (IllegalArgumentException ignored) {}
+        } catch (IllegalArgumentException ignored) {
+            return "invalid URL";
+        }
+    }
+
+    private void logFailure(String operation, String address, Exception error) {
+        String source = diagnosticEndpoint(address);
+        String target = source;
+        int redirects = 0;
+        long elapsedMillis = 0;
+        if (error instanceof UpstreamFailure failure) {
+            target = diagnosticEndpoint(failure.url.toASCIIString());
+            redirects = failure.redirects;
+            elapsedMillis = failure.elapsedMillis;
+        }
         Throwable cause = error;
         while (cause.getCause() != null && cause.getCause() != cause) cause = cause.getCause();
-        log.warn("Live {} failed for {}: {} ({})", operation, endpoint, errorMessage(error), cause.getClass().getSimpleName());
+        log.warn("Live {} failed for {}: {} ({}, source={}, redirects={}, elapsedMs={})",
+                operation, target, errorMessage(error), cause.getClass().getSimpleName(),
+                source, redirects, elapsedMillis);
     }
 
     private String errorMessage(Exception error) {
+        error = requestFailureCause(error);
         if (error instanceof HttpStatusCodeException httpError) {
+            if (httpError.getStatusCode().value() == 407) {
+                return "直播出口代理认证失败，请管理员检查 LIVE_HTTP_PROXY 的账号和密码。";
+            }
             return "直播源返回 HTTP " + httpError.getStatusCode().value() + "，请检查地址、授权和请求头。";
         }
         if (error instanceof ResourceAccessException) {

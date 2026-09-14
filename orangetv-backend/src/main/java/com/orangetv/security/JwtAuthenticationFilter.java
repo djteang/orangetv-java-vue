@@ -27,6 +27,9 @@ import java.util.List;
 @RequiredArgsConstructor
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
+    public static final String AUTHENTICATED_TOKEN_ATTRIBUTE =
+            JwtAuthenticationFilter.class.getName() + ".authenticatedToken";
+
     private final JwtTokenProvider tokenProvider;
     private final CustomUserDetailsService userDetailsService;
     private final TokenService tokenService;
@@ -64,6 +67,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
 
                 SecurityContextHolder.getContext().setAuthentication(authentication);
+                request.setAttribute(AUTHENTICATED_TOKEN_ATTRIBUTE, jwt);
             }
         } catch (Exception ex) {
             log.error("Could not set user authentication in security context", ex);
@@ -119,7 +123,15 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             return bearerToken.substring(7);
         }
 
-        // 2. 尝试从 Cookie 获取
+        // 原生媒体请求无法设置 Authorization，播放链接中的显式凭据优先于浏览器自动附带的旧 Cookie。
+        String queryToken = request.getParameter("token");
+        boolean livePlayback = ("GET".equals(request.getMethod()) || "HEAD".equals(request.getMethod()))
+                && (request.getContextPath() + "/api/live/stream").equals(request.getRequestURI());
+        if (livePlayback && StringUtils.hasText(queryToken)) {
+            return queryToken;
+        }
+
+        // 2. 其他请求保持原有的 Cookie 优先级。
         Cookie[] cookies = request.getCookies();
         if (cookies != null) {
             for (Cookie cookie : cookies) {
@@ -130,9 +142,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         }
 
         // 3. 尝试从查询参数获取
-        String token = request.getParameter("token");
-        if (StringUtils.hasText(token)) {
-            return token;
+        if (StringUtils.hasText(queryToken)) {
+            return queryToken;
         }
 
         return null;

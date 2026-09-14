@@ -14,6 +14,7 @@ import org.apache.hc.client5.http.ssl.SSLConnectionSocketFactoryBuilder;
 import org.apache.hc.client5.http.ssl.TrustAllStrategy;
 import org.apache.hc.core5.ssl.SSLContextBuilder;
 import org.apache.hc.core5.util.Timeout;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
@@ -34,6 +35,9 @@ import java.util.concurrent.Executor;
 @Configuration
 public class AppConfig {
 
+    @Value("${LIVE_HTTP_PROXY:}")
+    private String liveHttpProxy = "";
+
     @Bean
     @Primary
     public ObjectMapper objectMapper() {
@@ -46,20 +50,29 @@ public class AppConfig {
     @Bean
     @Primary
     public RestTemplate restTemplate() throws Exception {
-        return createRestTemplate(false, false);
+        return createRestTemplate(false, false, "");
     }
 
     @Bean(name = "searchRestTemplate")
     public RestTemplate searchRestTemplate() throws Exception {
-        return createRestTemplate(true, false);
+        return createRestTemplate(true, false, "");
     }
 
     @Bean(name = "liveRestTemplate")
     public RestTemplate liveRestTemplate() throws Exception {
-        return createRestTemplate(false, true);
+        return createRestTemplate(false, true, liveHttpProxy);
     }
 
-    private RestTemplate createRestTemplate(boolean searchClient, boolean liveClient) throws Exception {
+    @Bean(name = "liveMetadataRestTemplate")
+    public RestTemplate liveMetadataRestTemplate() throws Exception {
+        // 订阅、EPG 和 HEAD 检查需要普通响应处理，但与播放请求使用同一直播出口。
+        return createRestTemplate(false, false, liveHttpProxy);
+    }
+
+    private RestTemplate createRestTemplate(boolean searchClient, boolean liveClient, String proxyUrl) throws Exception {
+        var clientBuilder = HttpClients.custom();
+        LiveHttpProxy.configure(clientBuilder, proxyUrl);
+
         // 构建信任所有证书的 SSL 上下文（CMS 视频源 API 常使用自签名/过期证书）
         SSLContext sslContext = SSLContextBuilder.create()
                 .loadTrustMaterial(TrustAllStrategy.INSTANCE)
@@ -89,8 +102,7 @@ public class AppConfig {
                 .setRedirectsEnabled(!liveClient)
                 .build();
 
-        var clientBuilder = HttpClients.custom()
-                .setConnectionManager(connectionManager)
+        clientBuilder.setConnectionManager(connectionManager)
                 .setDefaultRequestConfig(requestConfig)
                 .setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
                 .disableCookieManagement();
